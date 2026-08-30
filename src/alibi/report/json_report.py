@@ -56,7 +56,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                 "views": sorted(entry.views),
                 "near_misses": [
                     {
-                        "other": str(nm.other),
+                        "other": str(nm.other) if nm.other else None,
                         "other_views": sorted(nm.other_views),
                         "reason": nm.reason,
                     }

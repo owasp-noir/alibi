@@ -234,8 +234,12 @@ def _render_finding(finding: Finding, paint: Painter, out) -> None:
 
     if finding.uncertain:
         near = finding.entry.near_misses[0]
-        out(paint(f"           near miss: {near.other} "
-                  f"in {', '.join(sorted(near.other_views))} -- {near.reason}", "medium"))
+        if near.other is None:
+            out(paint(f"           {near.reason}", "medium"))
+        else:
+            out(paint(f"           near miss: {near.other} "
+                      f"in {', '.join(sorted(near.other_views))} -- {near.reason}",
+                      "medium"))
 
 
 def _first_location(finding: Finding) -> str:
@@ -289,15 +293,19 @@ def _render_near_misses(index: Index, paint: Painter, out) -> None:
         return
     out()
     out(paint("REVIEW", "bold") + paint(
-        "  endpoints that nearly matched another view", "dim"))
-    out(paint("  Check these before trusting the findings above -- a bad match "
-              "here becomes a false finding.", "dim"))
+        "  reasons to distrust a finding above", "dim"))
+    out(paint("  Either two rows that probably describe one endpoint and did "
+              "not line up, or a\n  path that is not an endpoint at all. Check "
+              "these before trusting the findings.", "dim"))
     out()
     for entry in flagged[:20]:
         near = entry.near_misses[0]
         out(f"  {entry.key}")
-        out(paint(f"     ~ {near.other} in {', '.join(sorted(near.other_views))} "
-                  f"-- {near.reason}", "dim"))
+        if near.other is None:
+            out(paint(f"     {near.reason}", "dim"))
+        else:
+            out(paint(f"     ~ {near.other} in "
+                      f"{', '.join(sorted(near.other_views))} -- {near.reason}", "dim"))
     if len(flagged) > 20:
         out(paint(f"  ... and {len(flagged) - 20} more", "dim"))
 

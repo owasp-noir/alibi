@@ -95,14 +95,15 @@ class Entry:
 
 @dataclass
 class NearMiss:
-    """An endpoint in another view that this one nearly matched.
+    """A reason to distrust a finding on this endpoint.
 
-    A near miss is a warning about alibi, not about the repository: it means
-    two rows probably describe the same endpoint and normalization did not say
-    so. Findings carrying one are demoted rather than reported at face value.
+    Usually another endpoint this one probably *is*, which normalization
+    failed to line up -- a warning about alibi, not about the repository.
+    A mount label has no counterpart, so `other` is None there: nothing was
+    nearly matched, the path is simply not an endpoint of its own.
     """
 
-    other: Key
+    other: Key | None
     other_views: set[str]
     reason: str
 
@@ -292,6 +293,7 @@ def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
 
     beneath: set[str] = set()
     paths: set[str] = set()
+    segments: set[str] = set()
     for other in index.entries.values():
         if other is entry or other.key.path == entry.key.path:
             continue
@@ -301,12 +303,20 @@ def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
             continue
         beneath |= other.views
         paths.add(other.key.path)
+        segments.add(other.key.path[len(prefix) + 1:].split("/")[0])
 
     if len(paths) < MOUNT_THRESHOLD:
         return None
 
+    # Everything beneath it reached through a parameter, which is what a REST
+    # collection looks like from here: `/api/ipam/prefixes` above
+    # `/api/ipam/prefixes/{}` and its two actions. A mount leads somewhere
+    # named -- Argo CD's `/api` to `v1`, NetBox's to `dcim` and thirteen more.
+    if segments and all(s in ("{}", "*") for s in segments):
+        return None
+
     return NearMiss(
-        entry.key,
+        None,
         beneath,
         f"looks like a mount: {len(paths)} paths in {', '.join(sorted(beneath))} "
         f"live beneath this one",

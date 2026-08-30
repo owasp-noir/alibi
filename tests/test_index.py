@@ -227,3 +227,45 @@ def test_a_source_count_never_exceeds_the_total(endpoint, view_map):
     (_, count, _), = index.by_source(["service"])
 
     assert count == len(index.entries) == 1
+
+
+def test_a_collection_with_actions_is_still_not_a_mount(endpoint, view_map):
+    """Everything beneath it is reached through a parameter.
+
+    NetBox's `/api/ipam/prefixes` sits above `/api/ipam/prefixes/{}` and two
+    actions on it -- three distinct paths, and every one of them a sub-resource
+    of the collection rather than a separate thing the path leads to. A mount
+    leads somewhere named: Argo CD's `/api` to `v1`, NetBox's to `dcim` and
+    thirteen more.
+    """
+    endpoints = [endpoint("/api/prefixes", "DELETE", "oas3")]
+    endpoints += [
+        endpoint(path, "GET", "python_flask") for path in (
+            "/api/prefixes/{id}",
+            "/api/prefixes/{id}/available-ips",
+            "/api/prefixes/{id}/available-prefixes",
+        )
+    ]
+
+    index = build(endpoints, view_map)
+    collection = index.entries[
+        next(k for k in index.entries
+             if k.path == "/api/prefixes" and k.method == "DELETE")
+    ]
+    assert not any("mount" in nm.reason for nm in collection.near_misses)
+
+
+def test_a_mount_carries_no_counterpart(endpoint, view_map):
+    """Nothing was nearly matched -- the path is just not an endpoint.
+
+    Reporting it as `X ~ X` read as though an endpoint had failed to match
+    itself.
+    """
+    endpoints = [endpoint("/api", "POST", "go_http")]
+    endpoints += [endpoint(f"/api/v1/resource{i}", "GET", "oas2") for i in range(6)]
+
+    index = build(endpoints, view_map)
+    mount = index.entries[next(k for k in index.entries if k.path == "/api")]
+    label = next(nm for nm in mount.near_misses if "mount" in nm.reason)
+
+    assert label.other is None
