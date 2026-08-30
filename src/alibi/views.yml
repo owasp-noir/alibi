@@ -1,0 +1,103 @@
+# Which view of the attack surface does each noir technology speak for?
+#
+# Noir labels every endpoint it emits with `details.technology`. That label is
+# the only thing alibi needs in order to tell "this endpoint is implemented in
+# code" apart from "this endpoint is promised by a spec" -- one noir scan over a
+# tree containing code, an OpenAPI document and an nginx config comes back with
+# all three, each tagged.
+#
+# Only technologies that are NOT a programming language need a line here: noir
+# reports a `language` field for those 205, and every one of them describes code
+# that actually runs. Everything else -- the 48 entries below -- is a document,
+# a capture, or a piece of routing configuration, and has to be placed by hand.
+#
+# When noir adds a language, this file needs no change. When noir adds a
+# specification analyzer, `alibi doctor` reports it as unmapped.
+
+# Technologies noir reports a `language` for fall here.
+default: code
+
+views:
+  code:
+    description: What is actually implemented and will run.
+  doc:
+    description: What was promised. Hand-written or build-generated API contracts.
+  traffic:
+    description: What was actually requested, or what a client collection asks for.
+  gateway:
+    description: What is reachable from outside. Routing rules, not an endpoint set.
+    kind: predicate
+  infra:
+    description: What was declared for deployment. Also routing rules.
+    kind: predicate
+
+techs:
+  # --- doc: the contract ------------------------------------------------
+  oas2: doc
+  oas3: doc
+  raml: doc
+  wsdl: doc
+  smithy: doc
+  typespec: doc
+  asyncapi: doc
+  graphql_sdl: doc
+  grpc: doc
+  odata: doc
+  openrpc: doc
+
+  # --- traffic: observed ------------------------------------------------
+  # Real captures. Absence here is evidence an endpoint went unused during the
+  # capture window -- weak evidence, but evidence.
+  har: { view: traffic, kind: observed }
+  mitmproxy: { view: traffic, kind: observed }
+  burp: { view: traffic, kind: observed }
+  caido: { view: traffic, kind: observed }
+  zap_sites_tree: { view: traffic, kind: observed }
+
+  # --- traffic: curated -------------------------------------------------
+  # Hand-maintained request collections. Someone wrote these down, so presence
+  # is meaningful but absence proves nothing -- no rule may conclude an endpoint
+  # is unused because it is missing from a Postman collection.
+  postman: { view: traffic, kind: curated }
+  insomnia: { view: traffic, kind: curated }
+  bruno: { view: traffic, kind: curated }
+  http_file: { view: traffic, kind: curated }
+
+  # --- gateway: reachable from outside ----------------------------------
+  nginx: gateway
+  apache_httpd: gateway
+  envoy: gateway
+  kong: gateway
+  traefik: gateway
+  apisix: gateway
+  caddy: gateway
+  istio_virtualservice: gateway
+  k8s_ingress: gateway
+  k8s_gateway_api: gateway
+
+  # --- infra: declared deployment shape ---------------------------------
+  terraform: infra
+  aws_cloudformation: infra
+  aws_cdk: infra
+  serverless_framework: infra
+  azure_functions: infra
+  vercel: infra
+  netlify: infra
+  cloudflare_wrangler: infra
+  kamal: infra
+
+  # --- code: implemented, but not via a language analyzer ---------------
+  # Schema-driven platforms generate a real, running API from a schema. The
+  # endpoints exist and serve traffic, so they belong with the implementation.
+  strapi: code
+  supabase: code
+  hasura: code
+  directus: code
+  appwrite: code
+  payload_cms: code
+
+  # Mobile entry points are implemented surface too -- a deep link is a route
+  # into a running app.
+  android: code
+  ios: code
+  well_known_applinks: code

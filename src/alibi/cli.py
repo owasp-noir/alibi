@@ -1,0 +1,127 @@
+"""Command line entry point."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from . import collect
+from .index import build as build_index
+from .report import json_report, text
+from .rules import RuleSet
+from .views import ViewMap
+
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_ERROR = 2
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="alibi",
+        description="Cross-check the views of your attack surface and find the "
+                    "endpoints that cannot corroborate each other.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    scan = sub.add_parser("scan", help="scan sources and report where the views disagree")
+    scan.add_argument("paths", nargs="+", metavar="PATH",
+                      help="anything noir can read: a codebase, a spec directory, a capture file")
+    scan.add_argument("-f", "--format", choices=["text", "json"], default="text")
+    scan.add_argument("--noir-bin", help="path to the noir binary (default: found on PATH)")
+    scan.add_argument("--views", help="alternative views.yml")
+    scan.add_argument("--rules", help="alternative rules.yml")
+    scan.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"],
+                      help="exit non-zero when a finding reaches this severity")
+    scan.add_argument("--noir-arg", action="append", default=[], metavar="ARG",
+                      help="extra argument passed through to noir (repeatable)")
+
+    doctor = sub.add_parser(
+        "doctor", help="check the view map against this noir build's catalog")
+    doctor.add_argument("--noir-bin")
+    doctor.add_argument("--views")
+
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command == "scan":
+            return _scan(args)
+        if args.command == "doctor":
+            return _doctor(args)
+    except (collect.NoirNotFound, collect.NoirFailed) as exc:
+        print(f"alibi: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    return EXIT_ERROR
+
+
+def _scan(args) -> int:
+    view_map = ViewMap.load(args.views)
+    rules = RuleSet.load(args.rules)
+    noir_bin = collect.find_noir(args.noir_bin)
+
+    endpoints = []
+    names = []
+    for path in args.paths:
+        source = collect.Source(path=path)
+        names.append(source.name)
+        endpoints.extend(collect.scan(source, noir_bin, extra_args=args.noir_arg))
+
+    index = build_index(endpoints, view_map)
+    present_views = {view for entry in index.entries.values() for view in entry.views}
+    findings, skipped = rules.evaluate(index, present_views)
+
+    if args.format == "json":
+        print(json_report.dump(index, findings, skipped, names))
+    else:
+        text.render(index, findings, skipped, rules, names)
+
+    if args.fail_on:
+        threshold = rules.severities.index(args.fail_on)
+        if any(rules.severities.index(f.severity) >= threshold for f in findings):
+            return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _doctor(args) -> int:
+    """Report technologies this noir build knows that the view map does not.
+
+    The view map defaults anything unlisted to `code`, which is right for the
+    200-plus language analyzers and wrong for a specification analyzer added
+    after this file was last touched. Noir reports a `language` for the former
+    and not the latter, so the drift is exactly detectable.
+    """
+    view_map = ViewMap.load(args.views)
+    noir_bin = collect.find_noir(args.noir_bin)
+    catalog = collect.list_techs(noir_bin)
+
+    spec_techs = {name for name, spec in catalog.items() if "language" not in spec}
+    unmapped = sorted(spec_techs - view_map.mapped_techs)
+    stale = sorted(view_map.mapped_techs - set(catalog))
+
+    print(f"noir catalog: {len(catalog)} technologies "
+          f"({len(spec_techs)} non-language)")
+    print(f"view map:     {len(view_map.mapped_techs)} mapped")
+
+    if unmapped:
+        print()
+        print("Unmapped, and would be read as code:")
+        for tech in unmapped:
+            print(f"  {tech}")
+        print()
+        print("Add each to views.yml under the view it speaks for.")
+
+    if stale:
+        print()
+        print("Mapped but no longer in this noir build:")
+        for tech in stale:
+            print(f"  {tech}")
+
+    if not unmapped and not stale:
+        print()
+        print("View map matches this noir build.")
+
+    return EXIT_FINDINGS if unmapped else EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

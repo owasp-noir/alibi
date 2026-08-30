@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "noir-alibi"
+version = "0.1.0"
+description = "Cross-check the views of your attack surface and find the endpoints that cannot corroborate each other"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "hahwul", email = "hahwul@gmail.com" },
+]
+keywords = ["security", "api", "shadow-api", "attack-surface", "noir"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+]
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/owasp-noir/alibi"
+Issues = "https://github.com/owasp-noir/alibi/issues"
+
+[project.scripts]
+alibi = "alibi.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alibi"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

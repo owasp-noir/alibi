@@ -1,0 +1,95 @@
+# What it means when the views disagree.
+#
+# Each rule is a predicate over which views vouched for an endpoint. `present`
+# and `absent` are both required to hold.
+#
+# `needs` is the guard that keeps this tool usable. A scan with no API contract
+# anywhere in it would otherwise report every single endpoint as an undocumented
+# shadow API -- hundreds of findings that say nothing except "you did not point
+# alibi at your docs". A rule only runs when every view it reasons about was
+# actually represented in the scan.
+
+severities: [info, low, medium, high, critical]
+
+rules:
+  - id: SHADOW
+    name: Shadow API
+    summary: Implemented, but no contract describes it
+    present: [code]
+    absent: [doc]
+    needs: [code, doc]
+    severity: medium
+    detail: >-
+      The endpoint exists in the codebase and will answer requests, but no
+      OpenAPI, GraphQL, WSDL or other specification in the scan mentions it.
+      Consumers cannot know it is there, and neither can whoever reviews the
+      documented surface for security.
+
+  - id: PHANTOM
+    name: Phantom contract
+    summary: Promised by a contract, absent from the code
+    present: [doc]
+    absent: [code]
+    needs: [code, doc]
+    severity: low
+    detail: >-
+      A specification advertises this endpoint but nothing in the codebase
+      implements it. Usually a route that was removed without the contract
+      being updated, or one that was designed and never built. Clients written
+      against the document will get a 404.
+
+# Severity moves up or down by whole steps. Adjustments accumulate.
+#
+# `rules` scopes an adjustment to the findings where it means something. Asking
+# whether a PHANTOM endpoint has an authentication check is incoherent -- the
+# endpoint does not exist -- so that adjustment names only the rules about code
+# that really runs.
+#
+# `needs_signal` guards adjustments that fire on an *absence*. Noir's auth
+# taggers only recognise the frameworks they know, so "carries no auth tag"
+# means "unauthenticated" in a stack noir tags, and means nothing at all in one
+# it does not. Requiring the signal to appear somewhere in the scan is what
+# separates the two; without it every endpoint in an untagged codebase is
+# promoted, and the severity column stops carrying information.
+adjustments:
+  - id: pii
+    rules: [SHADOW]
+    when: { tag: pii }
+    shift: +1
+    why: an undocumented endpoint that handles personal data
+
+  - id: upload
+    rules: [SHADOW]
+    when: { tag: file_upload }
+    shift: +1
+    why: upload paths carry more consequence than reads
+
+  - id: no-auth
+    rules: [SHADOW]
+    when: { no_tag_matching: "auth|jwt|oauth|session|login|token" }
+    needs_signal: { tag_matching: "auth|jwt|oauth|session|login|token" }
+    shift: +1
+    why: no sign of an authentication check, in a codebase where noir found them elsewhere
+
+  - id: writes
+    rules: [SHADOW]
+    when: { method_in: [POST, PUT, PATCH, DELETE, QUERY] }
+    shift: +1
+    why: changes state rather than reading it
+
+  - id: near-miss
+    when: { near_miss: true }
+    shift: -1
+    why: >-
+      a similar endpoint exists in the other view, so this may be a matching
+      failure inside alibi rather than a real gap
+
+# Conditions that keep a finding from being reported at all.
+suppress:
+  - when: { internal: true }
+    why: noir marked this endpoint as internal-only
+
+  - when: { non_http: true }
+    why: >-
+      STOMP and WebSocket verbs share a URL space with HTTP but are not
+      described by the same contracts, so their absence is not evidence

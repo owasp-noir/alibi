@@ -1,0 +1,23 @@
+openapi: 3.0.0
+info:
+  title: Matched fixture
+  version: "1.0"
+paths:
+  /users/{userId}:
+    get:
+      summary: Read one user
+      responses:
+        "200":
+          description: ok
+  /users/{userId}/avatar:
+    post:
+      summary: Replace the avatar
+      responses:
+        "200":
+          description: ok
+  /reports/{reportId}:
+    get:
+      summary: Documented but never built
+      responses:
+        "200":
+          description: ok
