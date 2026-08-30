@@ -159,6 +159,13 @@ adjustments:
     shift: +1
     why: changes state rather than reading it
 
+  - id: thin-routing
+    when: { thin_routing_view: true }
+    shift: -1
+    why: >-
+      the routing config in this scan reaches almost none of the code, so it is
+      probably not the one that fronts it
+
   - id: near-miss
     when: { near_miss: true }
     shift: -1
@@ -170,6 +177,12 @@ adjustments:
 suppress:
   - when: { internal: true }
     why: noir marked this endpoint as internal-only
+
+  - when: { catch_all: true }
+    why: >-
+      a handler registered at / or /* is the code's own fallback, not an
+      endpoint anyone can name -- the mirror of the nginx `location /` that
+      coverage already refuses to count
 
   - when: { non_http: true }
     why: >-

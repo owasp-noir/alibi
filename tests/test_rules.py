@@ -335,3 +335,67 @@ def test_non_web_surface_never_generates_web_findings(endpoint, view_map):
 
     assert not [f for f in findings if f.key.protocol != "http"]
     assert {f.key.path for f in findings if f.rule_id == "SHADOW"} == {"/api/real"}
+
+
+def test_a_catch_all_handler_is_not_a_missing_endpoint(endpoint, view_map):
+    """The mirror of refusing to count `location /` as coverage.
+
+    Authentik registers Rust fallback handlers at `/` and `/*`. Asked whether a
+    gateway reaches them or a specification describes them, every one qualifies
+    for every rule -- 141 findings about handlers that are not endpoints anyone
+    can name.
+    """
+    endpoints = [endpoint("/api", "ANY", "nginx")]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(4)]
+    endpoints += [
+        endpoint("/*", "GET", "rust_axum"),
+        endpoint("/", "GET", "rust_axum"),
+        endpoint("/*", "POST", "rust_axum"),
+    ]
+
+    findings, _ = evaluate(endpoints, view_map)
+
+    assert not [f for f in findings if f.key.catch_all]
+    assert [f for f in findings if f.rule_id == "UNEXPOSED"] == []
+
+
+def test_a_routing_config_that_barely_touches_the_code_demotes_its_findings(
+    endpoint, view_map
+):
+    """authentik's "infrastructure" is its docs site's Netlify redirect map.
+
+    It reaches 3% of the code and produced 58 medium findings about drift
+    between a documentation site and an application. The same reasoning
+    `needs_signal` makes for tags applies: an absence is only evidence when the
+    thing could have been present, and "no rule here reaches that" says nothing
+    when this config plainly does not front that code.
+
+    Demoted, not dropped -- the finding may still be real, and severity is what
+    drives triage order and CI gates.
+    """
+    # One infra rule that matches, twenty code endpoints it has nothing to do
+    # with: 5% coverage.
+    endpoints = [endpoint("/docs/redirect", "GET", "netlify")]
+    endpoints += [endpoint("/docs/redirect", "GET", "python_flask")]
+    endpoints += [endpoint(f"/app/thing{i}", "GET", "python_flask") for i in range(19)]
+    endpoints.append(endpoint("/infra/ghost", "GET", "netlify"))
+
+    thin, _ = evaluate(endpoints, view_map)
+    drift = next(f for f in thin if f.rule_id == "DRIFT")
+    assert drift.severity == "low"
+    assert drift.base_severity == "medium"
+    assert any("does not front" in a.why or "fronts it" in a.why
+               for a in drift.adjustments)
+
+
+def test_a_routing_config_that_does_front_the_code_keeps_its_severity(
+    endpoint, view_map
+):
+    """NetBox's real nginx config reaches all of it; nothing is demoted."""
+    endpoints = [endpoint("/app", "ANY", "terraform")]
+    endpoints += [endpoint(f"/app/thing{i}", "GET", "python_flask") for i in range(8)]
+    endpoints.append(endpoint("/infra/ghost", "GET", "terraform"))
+
+    findings, _ = evaluate(endpoints, view_map)
+    drift = next(f for f in findings if f.rule_id == "DRIFT")
+    assert drift.severity == "medium"

@@ -97,6 +97,19 @@ class Key:
     def http(self) -> bool:
         return self.protocol == HTTP
 
+    @property
+    def catch_all(self) -> bool:
+        """Does this address everything rather than something?
+
+        A handler registered at `/` or `/*` is the code's own fallback -- the
+        mirror of an nginx `location /`, which coverage already refuses to
+        count as evidence. Asking whether a gateway reaches it, or whether a
+        specification describes it, is asking the wrong question: it is not an
+        endpoint anyone can name.
+        """
+        segments = [s for s in self.path.split("/") if s]
+        return not segments or all(s == "*" for s in segments)
+
     def __str__(self) -> str:
         if self.http:
             return f"{self.method} {self.path}"

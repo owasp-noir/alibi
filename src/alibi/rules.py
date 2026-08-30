@@ -44,6 +44,18 @@ class Finding:
         return bool(self.entry.near_misses)
 
 
+# A routing view reaching less of the code than this is probably not the one
+# fronting it. Measured across five repositories: NetBox's real nginx config
+# reaches 100% of its code, Argo CD's e2e test fixture 39%, authentik's gateway
+# 37% -- and authentik's "infrastructure", which is its documentation site's
+# Netlify redirect map, reaches 3%. The threshold sits in that gap.
+#
+# It demotes rather than suppresses. The reasoning is the one `needs_signal`
+# already makes for tags: an absence is only evidence when the thing could have
+# been present, and "no gateway rule reaches this" says nothing when that
+# gateway demonstrably does not front this codebase.
+THIN_COVERAGE = 0.25
+
 # Below this, a view is too small for its isolation to mean anything -- two
 # endpoints that happen to miss each other are not evidence of a broken
 # comparison. The check is on the *larger* of the two populations: a view with
@@ -187,6 +199,20 @@ class RuleSet:
             return index.overlap(left, right)
         return index.overlap(left, right)
 
+    def _thin(self, index: Index, rule: dict | None) -> bool:
+        """Does this rule lean on a routing view that barely touches the code?"""
+        if rule is None:
+            return False
+        views = [v for v in rule.get("needs", []) if v in index.coverages]
+        stats = index.coverage_stats()
+        for view in views:
+            if view not in stats:
+                continue
+            _, reached, total = stats[view]
+            if total and reached / total < THIN_COVERAGE:
+                return True
+        return False
+
     def _available_signals(self, index: Index) -> set[str]:
         """Which absence-based adjustments have evidence that they mean anything.
 
@@ -238,7 +264,7 @@ class RuleSet:
                 continue
             if adjustment.get("needs_signal") and adjustment["id"] not in signals:
                 continue
-            if self._condition(entry, adjustment["when"], index):
+            if self._condition(entry, adjustment["when"], index, rule):
                 shift = int(adjustment["shift"])
                 severity = self._shift(severity, shift)
                 applied.append(Adjustment(shift, adjustment.get("why", "")))
@@ -254,7 +280,11 @@ class RuleSet:
             adjustments=applied,
         )
 
-    def _condition(self, entry: Entry, when: dict, index: Index) -> bool:
+    def _condition(self, entry: Entry, when: dict, index: Index,
+                   rule: dict | None = None) -> bool:
+        if when.get("thin_routing_view") and not self._thin(index, rule):
+            return False
+
         if "not_covered_by" in when:
             view = when["not_covered_by"]
             coverage = index.coverages.get(view)
@@ -270,6 +300,9 @@ class RuleSet:
             reach = CoverRule(key=entry.key, view="", prefix=True)
             if any(reach.reaches(key) for key in index.keys_in(target)):
                 return False
+
+        if "catch_all" in when and entry.key.catch_all != bool(when["catch_all"]):
+            return False
 
         if "observed_in" in when and not entry.observed_in(when["observed_in"]):
             return False
