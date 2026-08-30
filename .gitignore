@@ -10,3 +10,4 @@ build/
 .alibi/
 *.sqlite3
 .DS_Store
+uv.lock
