@@ -64,6 +64,18 @@ class ViewMap:
     def describe(self, view: str) -> str:
         return self._views.get(view, {}).get("description", "")
 
+    def techs_by_view(self, catalog: dict) -> dict[str, list[str]]:
+        """Bucket every technology this noir build knows into its view.
+
+        The catalog is the authority for which technologies exist; this file is
+        the authority for what each one speaks for. Together they produce the
+        `--only-techs` list that isolates one view per scan.
+        """
+        buckets: dict[str, list[str]] = {}
+        for tech in catalog:
+            buckets.setdefault(self.lookup(tech).view, []).append(tech)
+        return {view: sorted(techs) for view, techs in buckets.items()}
+
     def lookup(self, tech: str) -> TechView:
         """Place a technology. Anything unlisted is code.
 

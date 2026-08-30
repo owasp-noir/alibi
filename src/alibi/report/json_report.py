@@ -19,6 +19,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
         "sources": sources,
         "summary": {
             "endpoints": len(index.entries),
+            "corroborated": index.corroborated,
             "findings": len(findings),
             "near_misses": index.near_miss_count,
             "views": view_counts,

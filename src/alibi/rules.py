@@ -43,8 +43,11 @@ class Finding:
         return bool(self.entry.near_misses)
 
 
-# Below this, two views are too small for their overlap to mean anything --
-# a two-path spec that happens to miss is not evidence of a broken comparison.
+# Below this, a view is too small for its isolation to mean anything -- two
+# endpoints that happen to miss each other are not evidence of a broken
+# comparison. The check is on the *larger* of the two populations: a view with
+# forty documented endpoints that shares none of them is the surprising thing,
+# however little the other side happens to hold.
 MIN_POPULATION_FOR_OVERLAP = 5
 
 
@@ -136,7 +139,7 @@ class RuleSet:
         left, right = views
         left_size = index.population(left)
         right_size = index.population(right)
-        if min(left_size, right_size) < MIN_POPULATION_FOR_OVERLAP:
+        if max(left_size, right_size) < MIN_POPULATION_FOR_OVERLAP:
             return None
         if index.overlap(left, right) > 0:
             return None

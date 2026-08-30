@@ -15,6 +15,7 @@ _COLORS = {
     "medium": "\x1b[33m",
     "low": "\x1b[36m",
     "info": "\x1b[90m",
+    "ok": "\x1b[32m",
     "dim": "\x1b[90m",
     "bold": "\x1b[1m",
     "reset": "\x1b[0m",
@@ -62,6 +63,9 @@ def render(
         f"{view} {paint(str(count), 'bold')}"
         for view, count in sorted(view_counts.items(), key=lambda kv: -kv[1])
     ))
+    out()
+    out("  " + paint(f"{index.corroborated} corroborated", "ok")
+        + paint(" -- vouched for by more than one view", "dim"))
 
     # The near-miss count is the tool's own error bar. It belongs next to the
     # totals, not buried under the findings, because every finding below is

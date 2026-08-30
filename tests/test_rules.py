@@ -194,3 +194,21 @@ def test_a_tiny_scan_is_not_second_guessed(endpoint, view_map):
     )
     assert {f.rule_id for f in findings} == {"SHADOW", "PHANTOM"}
     assert skipped == []
+
+
+def test_a_populated_view_sharing_nothing_is_disconnected_however_small_the_other(
+    endpoint, view_map
+):
+    """Flipt: noir reads 2 Go routes and 42 documented paths, sharing none.
+
+    The smaller side being tiny is not a reason to trust the comparison. A view
+    holding forty endpoints that corroborates none of them is the surprising
+    fact, and reporting 44 findings on top of it says nothing.
+    """
+    endpoints = [endpoint("/only-code", "GET", "go_http")]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(12)]
+
+    findings, skipped = evaluate(endpoints, view_map)
+
+    assert findings == []
+    assert {s.reason for s in skipped} == {"no-overlap"}

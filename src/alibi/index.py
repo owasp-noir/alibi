@@ -118,6 +118,17 @@ class Index:
     def near_miss_count(self) -> int:
         return sum(1 for e in self.entries.values() if e.near_misses)
 
+    @property
+    def corroborated(self) -> int:
+        """Endpoints more than one view vouches for.
+
+        The headline number. Findings are the endpoints that failed to
+        corroborate, so this is what says whether the comparison worked at all
+        -- a report of 147 findings means something different next to 230
+        corroborated endpoints than next to none.
+        """
+        return sum(1 for e in self.entries.values() if len(e.views) > 1)
+
 
 def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
     index = Index()

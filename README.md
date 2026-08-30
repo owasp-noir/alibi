@@ -24,16 +24,19 @@ Noir already reads five independent views of the same surface:
 | **infra** | Terraform, CloudFormation, CDK, Serverless, Vercel, Netlify, Wrangler, Azure Functions, Kamal |
 
 What it does not do is compare them. That is the whole job here, and it needs no
-change to noir: every endpoint noir emits already carries the technology that
-produced it, so a single scan over a tree holding code, a spec and an nginx
-config comes back with all three, each labelled.
+change to noir — alibi runs it once per view and joins the results.
 
-```console
-$ noir -b ./mixed -f json | jq -r '.endpoints[].details.technology' | sort | uniq -c
-  12 python_flask
-   5 oas3
-   5 nginx
-```
+The per-view part matters. Noir deduplicates by `(method, url)` across every
+analyzer, so a Flask route and an OpenAPI path spelled identically collapse into
+one endpoint carrying one technology. That is right for a discovery tool — it is
+one endpoint — but it erases the corroboration this tool is built to measure,
+and it erases it in the worst possible direction: the better two views agree,
+the more of them vanish. Casdoor scans as 372 code endpoints and 9 documented
+ones; scan its `swagger/` directory alone and the specification has 235.
+
+`--only-techs` restricts the detector pool, so one scan per view keeps each one
+whole. Which technology speaks for which view is `views.yml`; which
+technologies exist is whatever `noir list techs` reports.
 
 alibi parses no API formats of its own. Its only input is noir's JSON.
 
@@ -154,12 +157,28 @@ Adding the traffic, gateway and infra rules is a matter of editing YAML.
 Early. Only `code` and `doc` rules are implemented; the other three views are
 mapped and collected but nothing compares them yet.
 
-Validated against authentik, Argo CD and NetBox. All three currently report no
-findings, correctly: NetBox ships no specification noir recognises, and in the
-other two the code and documentation views do not connect at the same
-granularity. Finding real disagreement needs a repository where noir reads both
-sides at route level — which is as much a statement about noir's per-stack
-coverage as about this tool.
+Measured against five repositories:
+
+| Repository | code | doc | corroborated | findings | near misses | |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| casdoor | 372 | 235 | 230 | 147 | 19 | compared |
+| flipt | 2 | 42 | 0 | 0 | 0 | held back |
+| authentik | 231 | 1193 | 0 | 0 | 12 | held back |
+| argo-cd | 59 | 198 | 0 | 0 | 14 | held back |
+| netbox | 855 | 0 | — | 0 | 2 | no contract found |
+
+Casdoor is the case where both views arrive at route level, and there **230 of
+its 235 documented endpoints matched the code — 97.9%, with no path
+normalization failures at all.** All 19 near misses were the same path under a
+different verb, which is noir registering every method on a Go catch-all
+handler, not a matching problem. That is the number that says whether this
+approach works.
+
+The other four are held back, and each for a real reason: NetBox ships no
+specification noir recognises; Argo CD registers `/api` in Go while documenting
+198 paths beneath it; noir reads no Django routes in authentik and picks up an
+unrelated Rust component instead. Reporting 1424 findings on authentik would
+have been easy and worthless.
 
 ## License
 

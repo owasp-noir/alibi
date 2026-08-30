@@ -59,12 +59,20 @@ def _scan(args) -> int:
     rules = RuleSet.load(args.rules)
     noir_bin = collect.find_noir(args.noir_bin)
 
+    # Noir's own catalog decides which technologies exist; views.yml decides
+    # what each one speaks for. One `--only-techs` list per view falls out.
+    catalog = collect.list_techs(noir_bin)
+    techs_by_view = view_map.techs_by_view(catalog)
+
     endpoints = []
     names = []
     for path in args.paths:
         source = collect.Source(path=path)
         names.append(source.name)
-        endpoints.extend(collect.scan(source, noir_bin, extra_args=args.noir_arg))
+        endpoints.extend(
+            collect.scan_views(source, noir_bin, techs_by_view,
+                               extra_args=args.noir_arg)
+        )
 
     index = build_index(endpoints, view_map)
     present_views = {view for entry in index.entries.values() for view in entry.views}
