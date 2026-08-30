@@ -25,7 +25,8 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
         },
         "findings": [_finding(f) for f in findings],
         "skipped_rules": [
-            {"rule": s.rule_id, "missing_views": s.missing} for s in skipped
+            {"rule": s.rule_id, "reason": s.reason, "detail": s.detail}
+            for s in skipped
         ],
         "review": [
             {

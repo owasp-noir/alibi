@@ -92,3 +92,43 @@ def test_internal_only_when_every_sighting_agrees(endpoint, view_map):
         view_map,
     )
     assert next(iter(index.entries.values())).internal is False
+
+
+def test_a_mount_point_is_recognised_as_one(endpoint, view_map):
+    """One Go route registering `/api` is not an endpoint the spec forgot."""
+    endpoints = [endpoint("/api", "POST", "go_http")]
+    endpoints += [
+        endpoint(f"/api/v1/resource{i}", "GET", "oas2") for i in range(6)
+    ]
+
+    index = build(endpoints, view_map)
+    mount = index.entries[next(k for k in index.entries if k.path == "/api")]
+
+    assert mount.near_misses
+    assert "mount" in mount.near_misses[-1].reason
+    assert "6 endpoints" in mount.near_misses[-1].reason
+
+
+def test_a_real_endpoint_with_children_is_not_called_a_mount(endpoint, view_map):
+    """`/users` can legitimately exist alongside `/users/{id}`."""
+    index = build(
+        [
+            endpoint("/users", "GET", "python_flask"),
+            endpoint("/users", "GET", "oas3"),
+            endpoint("/users/{id}", "GET", "oas3"),
+            endpoint("/users/{id}/avatar", "GET", "oas3"),
+        ],
+        view_map,
+    )
+    users = index.entries[next(k for k in index.entries if k.path == "/users")]
+    assert not any("mount" in nm.reason for nm in users.near_misses)
+
+
+def test_root_is_never_read_as_a_mount(endpoint, view_map):
+    """Everything lives under `/`. True, and useless as evidence."""
+    endpoints = [endpoint("/", "GET", "python_flask")]
+    endpoints += [endpoint(f"/thing{i}", "GET", "oas3") for i in range(6)]
+
+    index = build(endpoints, view_map)
+    root = index.entries[next(k for k in index.entries if k.path == "/")]
+    assert not any("mount" in nm.reason for nm in root.near_misses)

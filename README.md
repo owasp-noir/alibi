@@ -104,7 +104,7 @@ Findings say how the match was made:
 
 ## What keeps it honest
 
-A tool like this dies by reporting hundreds of findings on its first run. Three
+A tool like this dies by reporting hundreds of findings on its first run. Four
 things push back:
 
 **Rules do not fire without both views.** Scan a codebase with no contracts
@@ -120,6 +120,15 @@ miss — same path with a different verb, or one segment apart where one side ha
 a parameter and the other a literal. Findings carrying a near miss are demoted
 and flagged for review. That count sits next to the totals, because every
 finding is only as trustworthy as it is small.
+
+**Views that never met are one diagnostic, not hundreds of findings.** Argo CD
+registers `/api` in Go and documents 198 paths beneath it, so its code and its
+specification share not one endpoint. Read literally that is 58 shadow APIs and
+198 phantom contracts, none of them real. Zero corroboration between two
+populated views means the comparison did not work — a mount point standing in
+for the routes beneath it, or a stack noir could not read — so the rules are
+held back and the reason is printed instead. Paths that turn out to have many
+endpoints from other views beneath them are labelled as probable mounts.
 
 **An absence is only evidence when the signal exists.** Noir's auth taggers
 cover the frameworks they know. In a stack they do not cover, nothing carries an
@@ -144,6 +153,13 @@ Adding the traffic, gateway and infra rules is a matter of editing YAML.
 
 Early. Only `code` and `doc` rules are implemented; the other three views are
 mapped and collected but nothing compares them yet.
+
+Validated against authentik, Argo CD and NetBox. All three currently report no
+findings, correctly: NetBox ships no specification noir recognises, and in the
+other two the code and documentation views do not connect at the same
+granularity. Finding real disagreement needs a repository where noir reads both
+sides at route level — which is as much a statement about noir's per-stack
+coverage as about this tool.
 
 ## License
 

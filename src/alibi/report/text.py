@@ -75,7 +75,15 @@ def render(
 
     if not findings:
         out()
-        out("  " + paint("No disagreement between the views in this scan.", "info"))
+        # "Nothing to report" and "the comparison never ran" look identical from
+        # the outside and mean opposite things, so only claim agreement when a
+        # rule actually compared something.
+        if any(s.reason == "no-overlap" for s in skipped):
+            out("  " + paint("No findings -- but nothing was compared. See below.", "medium"))
+        elif skipped and len(skipped) == len(rules.rules):
+            out("  " + paint("No rule had the views it needs. See below.", "dim"))
+        else:
+            out("  " + paint("No disagreement between the views in this scan.", "info"))
         _render_skipped(skipped, paint, out)
         out()
         return
@@ -172,8 +180,37 @@ def _render_near_misses(index: Index, paint: Painter, out) -> None:
 def _render_skipped(skipped: list[Skipped], paint: Painter, out) -> None:
     if not skipped:
         return
-    out()
-    out(paint("Rules that did not run", "dim"))
-    for item in skipped:
-        views = ", ".join(item.missing)
-        out(paint(f"  {item.rule_id:<12} no {views} source in this scan", "dim"))
+
+    blocked = [s for s in skipped if s.reason == "no-overlap"]
+    quiet = [s for s in skipped if s.reason != "no-overlap"]
+
+    # A rule held back because the views did not connect is the most important
+    # thing on the page: it is the difference between "nothing to report" and
+    # "the comparison did not work", and the two look identical otherwise.
+    if blocked:
+        out()
+        out(paint("THE VIEWS DID NOT CONNECT", "high"))
+        for item in blocked:
+            out(paint(f"  {item.rule_id} held back", "bold"))
+            out(paint(f"  {_wrap(item.detail)}", "dim"))
+
+    if quiet:
+        out()
+        out(paint("Rules that did not run", "dim"))
+        for item in quiet:
+            out(paint(f"  {item.rule_id:<12} {item.detail}", "dim"))
+
+
+def _wrap(text: str, width: int = 74, indent: str = "  ") -> str:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if len(current) + len(word) + 1 > width:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        lines.append(current)
+    return f"\n{indent}".join(lines)

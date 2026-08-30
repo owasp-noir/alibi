@@ -99,6 +99,21 @@ class Index:
     def by_view(self, view: str) -> list[Entry]:
         return [e for e in self.entries.values() if view in e.views]
 
+    def population(self, view: str) -> int:
+        return sum(1 for e in self.entries.values() if view in e.views)
+
+    def overlap(self, left: str, right: str) -> int:
+        """How many endpoints both views vouch for.
+
+        Zero, between two populated views, is the single most useful number
+        this tool computes. It does not mean every endpoint is a defect; it
+        means the two views never met, and something upstream -- a mount point
+        standing in for the routes beneath it, a stack noir cannot read, two
+        unrelated services in one repository -- has to be fixed before any
+        finding here is worth reading.
+        """
+        return sum(1 for e in self.entries.values() if left in e.views and right in e.views)
+
     @property
     def near_miss_count(self) -> int:
         return sum(1 for e in self.entries.values() if e.near_misses)
@@ -120,6 +135,11 @@ def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
 
     _find_near_misses(index)
     return index
+
+
+# How many endpoints have to sit beneath a path before it is read as a mount
+# rather than an endpoint of its own.
+MOUNT_THRESHOLD = 3
 
 
 def _find_near_misses(index: Index) -> None:
@@ -159,6 +179,51 @@ def _find_near_misses(index: Index) -> None:
             reason = _one_segment_apart(entry.key.path, other.key.path)
             if reason:
                 entry.near_misses.append(NearMiss(other.key, other.views, reason))
+
+        mount = _looks_like_a_mount(entry, index)
+        if mount:
+            entry.near_misses.append(mount)
+
+
+def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
+    """Detect a registration that stands in for everything beneath it.
+
+    Frameworks that hand a whole subtree to another router -- a gRPC gateway,
+    a mounted sub-application, a catch-all handler -- give noir one route where
+    the specification gives dozens. Argo CD registers `/api` in Go and
+    documents 198 paths under `/api/v1/...`; read as endpoints, that is one
+    false shadow API and 198 false phantoms.
+
+    A path is read as a mount when endpoints from *other* views live beneath
+    it and none of them is it. Findings on it are demoted and labelled rather
+    than dropped, because a genuine endpoint can also have children.
+    """
+    prefix = entry.key.path.rstrip("/")
+    if prefix in ("", "/"):
+        # Everything lives under `/`. True, and useless as evidence.
+        return None
+
+    beneath: set[str] = set()
+    count = 0
+    for other in index.entries.values():
+        if other is entry or other.key.path == entry.key.path:
+            continue
+        if not other.key.path.startswith(prefix + "/"):
+            continue
+        if other.views <= entry.views:
+            continue
+        beneath |= other.views
+        count += 1
+
+    if count < MOUNT_THRESHOLD:
+        return None
+
+    return NearMiss(
+        entry.key,
+        beneath,
+        f"looks like a mount: {count} endpoints in {', '.join(sorted(beneath))} "
+        f"live beneath this path",
+    )
 
 
 def _one_segment_apart(left: str, right: str) -> str | None:

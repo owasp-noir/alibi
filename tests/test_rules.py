@@ -43,7 +43,7 @@ def test_no_contract_in_the_scan_means_no_shadow_findings(endpoint, view_map):
 
     assert findings == []
     assert {s.rule_id for s in skipped} == {"SHADOW", "PHANTOM"}
-    assert skipped[0].missing == ["doc"]
+    assert skipped[0].reason == "missing-view"
 
 
 def test_writes_outrank_reads(endpoint, view_map):
@@ -148,3 +148,49 @@ def test_websocket_verbs_are_not_measured_against_http_contracts(endpoint, view_
         view_map,
     )
     assert not [f for f in findings if f.key.method == "SEND"]
+
+
+def test_views_that_never_met_hold_the_rules_back(endpoint, view_map):
+    """The guard that survives contact with a real repository.
+
+    Argo CD registers `/api` in Go and documents 198 paths beneath it, so code
+    and docs share not one endpoint. Read literally that is 58 shadow APIs and
+    198 phantom contracts; read honestly it is one fact about the scan. Zero
+    corroboration between two populated views means the comparison did not
+    work, and reporting hundreds of findings on top of it buries that.
+    """
+    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(8)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(8)]
+
+    findings, skipped = evaluate(endpoints, view_map)
+
+    assert findings == []
+    assert {s.reason for s in skipped} == {"no-overlap"}
+    assert "never met" in skipped[0].detail
+
+
+def test_one_shared_endpoint_is_enough_to_trust_the_comparison(endpoint, view_map):
+    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(8)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(8)]
+    endpoints += [
+        endpoint("/shared", "GET", "python_flask"),
+        endpoint("/shared", "GET", "oas3"),
+    ]
+
+    findings, skipped = evaluate(endpoints, view_map)
+
+    assert skipped == []
+    assert len(findings) == 16
+
+
+def test_a_tiny_scan_is_not_second_guessed(endpoint, view_map):
+    """Two endpoints that miss each other are not evidence of a broken tool."""
+    findings, skipped = evaluate(
+        [
+            endpoint("/only-code", "GET", "python_flask"),
+            endpoint("/only-doc", "GET", "oas3"),
+        ],
+        view_map,
+    )
+    assert {f.rule_id for f in findings} == {"SHADOW", "PHANTOM"}
+    assert skipped == []

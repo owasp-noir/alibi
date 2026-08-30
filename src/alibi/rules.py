@@ -43,12 +43,18 @@ class Finding:
         return bool(self.entry.near_misses)
 
 
+# Below this, two views are too small for their overlap to mean anything --
+# a two-path spec that happens to miss is not evidence of a broken comparison.
+MIN_POPULATION_FOR_OVERLAP = 5
+
+
 @dataclass
 class Skipped:
     """A rule that could not run, and why. Reported, never silently dropped."""
 
     rule_id: str
-    missing: list[str]
+    reason: str
+    detail: str
 
 
 class RuleSet:
@@ -83,8 +89,17 @@ class RuleSet:
         for rule in self.rules:
             missing = [v for v in rule.get("needs", []) if v not in present_views]
             if missing:
-                skipped.append(Skipped(rule["id"], missing))
+                skipped.append(Skipped(
+                    rule["id"], "missing-view",
+                    f"no {', '.join(missing)} source in this scan",
+                ))
                 continue
+
+            disconnected = self._disconnected(index, rule)
+            if disconnected:
+                skipped.append(disconnected)
+                continue
+
             runnable.append(rule)
 
         for entry in index.entries.values():
@@ -99,6 +114,40 @@ class RuleSet:
             key=lambda f: (-self.severities.index(f.severity), f.key.path, f.key.method)
         )
         return findings, skipped
+
+    def _disconnected(self, index: Index, rule: dict) -> Skipped | None:
+        """Refuse to report when the views a rule compares never met.
+
+        A rule like SHADOW is only meaningful if code and documentation
+        describe the same surface at the same granularity. When noir reads a
+        mount point on one side and a generated specification on the other, or
+        cannot read one stack at all, the two populations are disjoint and
+        every endpoint qualifies -- Argo CD produces 58 shadow APIs and 198
+        phantom contracts that way, none of them real.
+
+        Zero corroboration between two populated views is a fact about the
+        scan, not about the repository, so it is reported as one diagnostic
+        instead of hundreds of findings.
+        """
+        views = list(rule.get("needs", []))
+        if len(views) != 2:
+            return None
+
+        left, right = views
+        left_size = index.population(left)
+        right_size = index.population(right)
+        if min(left_size, right_size) < MIN_POPULATION_FOR_OVERLAP:
+            return None
+        if index.overlap(left, right) > 0:
+            return None
+
+        return Skipped(
+            rule["id"], "no-overlap",
+            f"{left_size} {left} and {right_size} {right} endpoints, none of them "
+            f"the same -- the two views never met, so every endpoint would "
+            f"qualify. Check whether one side is a mount point standing in for "
+            f"the routes beneath it, or a stack noir could not read.",
+        )
 
     def _available_signals(self, index: Index) -> set[str]:
         """Which absence-based adjustments have evidence that they mean anything.
