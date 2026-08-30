@@ -82,7 +82,15 @@ class Entry:
         return GRADE_EXACT if len(originals) == 1 else GRADE_TEMPLATE
 
     def code_paths(self) -> list[dict]:
-        return [cp for obs in self.observations for cp in obs.raw.code_paths]
+        """Every file behind this endpoint, each carrying the root it came from.
+
+        The root travels with the path because a report has to be able to say
+        `routers/router.go` rather than the absolute path noir echoed back --
+        GitHub code scanning matches alerts to source by repository-relative
+        path, and an absolute `file://` URI matches nothing.
+        """
+        return [dict(cp, source_root=obs.raw.source_root)
+                for obs in self.observations for cp in obs.raw.code_paths]
 
 
 @dataclass

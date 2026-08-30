@@ -371,3 +371,83 @@ def test_a_suppressed_finding_is_reported_as_suppressed_not_dropped(
     assert document["runs"][0]["properties"]["suppressed"] == len(hidden)
     # And the reported ones carry no suppression at all.
     assert all("suppressions" not in r for r in results if r not in suppressed)
+
+
+def _with_root(endpoint, url, method, tech, path, root, line=None):
+    """A finding whose code path carries the root its scan was given."""
+    from alibi.collect import RawEndpoint
+
+    return RawEndpoint(
+        url=url, method=method, technology=tech, source="svc",
+        source_root=root,
+        code_paths=({"path": path, "line": line},) if line
+        else ({"path": path},),
+    )
+
+
+def test_a_location_is_relative_to_the_checkout_not_the_machine(view_map):
+    """The field code scanning matches an alert to its source file by.
+
+    It matches on a path relative to the repository checkout, so an absolute
+    `file://` URI matches nothing and the alert arrives with no code behind
+    it -- which is most of what code scanning is for. Every one of Casdoor's
+    139 results was absolute.
+    """
+    root = "/build/checkout"
+    endpoints = [
+        _with_root(None, "/api/thing", "GET", "go_http",
+                   f"{root}/routers/router.go", root, line=87),
+        _with_root(None, "/anchor", "GET", "oas3", f"{root}/openapi.json", root),
+    ]
+
+    document = emit(endpoints, view_map)
+    artifact = results(document)[0]["locations"][0]["physicalLocation"]["artifactLocation"]
+
+    assert artifact["uri"] == "routers/router.go"
+    assert artifact["uriBaseId"] == "%SRCROOT%"
+    assert document["runs"][0]["originalUriBaseIds"] == {
+        "%SRCROOT%": {"uri": "file:///build/checkout/"}
+    }
+
+
+def test_a_path_outside_every_root_is_named_absolutely(view_map):
+    """Inventing a relative path for it would describe a layout that is not there."""
+    endpoints = [
+        _with_root(None, "/api/thing", "GET", "go_http",
+                   "/elsewhere/vendor/lib.go", "/build/checkout", line=3),
+        _with_root(None, "/anchor", "GET", "oas3",
+                   "/build/checkout/openapi.json", "/build/checkout"),
+    ]
+
+    document = emit(endpoints, view_map)
+    uris = [
+        location["physicalLocation"]["artifactLocation"]["uri"]
+        for result in results(document)
+        for location in result.get("locations", [])
+        if "physicalLocation" in location
+    ]
+
+    assert "file:///elsewhere/vendor/lib.go" in uris
+
+
+def test_several_roots_leave_the_base_undeclared(view_map):
+    """Pointing one base id at one of them would be wrong for the rest."""
+    endpoints = [
+        _with_root(None, "/api/thing", "GET", "go_http",
+                   "/a/routers/router.go", "/a", line=1),
+        _with_root(None, "/api/other", "GET", "go_http",
+                   "/b/handlers/h.go", "/b", line=1),
+        _with_root(None, "/anchor", "GET", "oas3", "/a/openapi.json", "/a"),
+    ]
+
+    document = emit(endpoints, view_map)
+
+    assert "originalUriBaseIds" not in document["runs"][0]
+    uris = [
+        location["physicalLocation"]["artifactLocation"]["uri"]
+        for result in results(document)
+        for location in result.get("locations", [])
+        if "physicalLocation" in location
+    ]
+    assert "routers/router.go" in uris
+    assert "handlers/h.go" in uris

@@ -46,10 +46,16 @@ class Source:
 
     path: str
     name: str = ""
+    # The path the user actually named. A file source is staged into a
+    # temporary directory before noir sees it, and `path` becomes that
+    # directory -- but a report has to speak in terms of what was asked for.
+    root: str = ""
 
     def __post_init__(self) -> None:
         if not self.name:
             self.name = Path(self.path).name or self.path
+        if not self.root:
+            self.root = self.path
 
 
 @dataclass(frozen=True)
@@ -104,6 +110,7 @@ class RawEndpoint:
     code_paths: tuple[dict, ...] = ()
     internal: bool = False
     protocol: str = "http"
+    source_root: str = ""
     raw: dict = field(default_factory=dict)
 
 
@@ -133,7 +140,7 @@ def scannable(source: Source):
             os.link(path, staged)
         except OSError:
             shutil.copy2(path, staged)
-        yield Source(path=staging, name=source.name)
+        yield Source(path=staging, name=source.name, root=source.root)
 
 
 def find_noir(explicit: str | None = None) -> str:
@@ -193,7 +200,7 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
         ) from exc
 
     return ScanResult(
-        endpoints=[_convert(item, source.name)
+        endpoints=[_convert(item, source.name, source.root)
                    for item in document.get("endpoints", [])],
         errors=[
             ScanError(
@@ -231,7 +238,7 @@ def scan_views(source: Source, noir_bin: str, techs_by_view: dict[str, list[str]
     return ScanResult(endpoints=endpoints, errors=list(dict.fromkeys(errors)))
 
 
-def _convert(item: dict, source_name: str) -> RawEndpoint:
+def _convert(item: dict, source_name: str, source_root: str = "") -> RawEndpoint:
     details = item.get("details") or {}
     return RawEndpoint(
         url=item.get("url", ""),
@@ -243,6 +250,7 @@ def _convert(item: dict, source_name: str) -> RawEndpoint:
         code_paths=tuple(details.get("code_paths") or []),
         internal=bool(item.get("internal", False)),
         protocol=item.get("protocol", "http"),
+        source_root=source_root,
         raw=item,
     )
 

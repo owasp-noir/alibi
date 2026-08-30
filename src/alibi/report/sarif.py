@@ -72,6 +72,10 @@ def _level(severity: str) -> str:
     return _LEVELS.get(severity, _UNKNOWN_LEVEL)
 
 
+# Names the checkout every relative path hangs off.
+SRCROOT = "%SRCROOT%"
+
+
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
           sources: list[str], ruleset: RuleSet, errors: list = (),
           suppressed: list = ()) -> dict:
@@ -111,6 +115,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                 # them as dismissed with the project's own reason attached,
                 # which is the same promise the terminal report makes: say what
                 # was withheld, never withhold it silently.
+                **_uri_bases(findings),
                 "results": [_result(f, position) for f in findings]
                 + [_result(f, position, entry) for f, entry in suppressed],
                 # A findings list with no denominator is what this tool exists
@@ -129,6 +134,28 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             }
         ],
     }
+
+
+def _uri_bases(findings: list[Finding]) -> dict:
+    """Declare what %SRCROOT% is, when the scan had exactly one root.
+
+    With several sources there is no single checkout for the paths to hang
+    off, and pointing the base id at one of them would be wrong for the rest.
+    Code scanning matches on the relative path regardless; the declaration is
+    for consumers that resolve the reference.
+    """
+    roots = {
+        code_path.get("source_root")
+        for finding in findings
+        for code_path in finding.entry.code_paths()
+        if code_path.get("source_root")
+    }
+    if len(roots) != 1:
+        return {}
+    root = Path(roots.pop())
+    if not root.is_absolute():
+        return {}
+    return {"originalUriBaseIds": {SRCROOT: {"uri": root.as_uri() + "/"}}}
 
 
 def _error_notification(error) -> dict:
@@ -251,12 +278,18 @@ def _locations(finding: Finding) -> list[dict]:
         # specification analyzers -- they point at a document rather than at a
         # statement in it. A region with no line would be a claim about where.
         start = line if isinstance(line, int) and line > 0 else None
-        uri = _uri(str(path))
+        uri = _uri(str(path), code_path.get("source_root") or "")
         if (uri, start) in seen:
             continue
         seen.add((uri, start))
 
-        location = {"physicalLocation": {"artifactLocation": {"uri": uri}}}
+        artifact = {"uri": uri}
+        if not uri.startswith("file:"):
+            # Names the base the path is relative to. Code scanning matches on
+            # the path itself, but a consumer that resolves the reference needs
+            # to be told what it hangs off.
+            artifact["uriBaseId"] = SRCROOT
+        location = {"physicalLocation": {"artifactLocation": artifact}}
         if start is not None:
             location["physicalLocation"]["region"] = {"startLine": start}
         physical.append(location)
@@ -267,22 +300,38 @@ def _locations(finding: Finding) -> list[dict]:
     return [{"logicalLocations": [{"name": str(finding.key), "kind": "resource"}]}]
 
 
-def _uri(path: str) -> str:
+def _uri(path: str, root: str = "") -> str:
     """Turn a noir code path into a URI reference a consumer can resolve.
 
-    Noir echoes back whatever base path it was given, so an absolute scan
-    yields absolute code paths. Relative to the working directory is what code
-    scanning can line up against the repository; anything outside it can only
-    be named absolutely. Either way a file path is not a URI -- a space or a
-    `#` in a name has to be escaped, or the reference is not one.
+    This is the field GitHub code scanning matches an alert to a source file
+    by, and it matches on a path relative to the repository checkout. An
+    absolute `file://` URI matches nothing: the alert appears with no code
+    behind it, which is most of what code scanning is for. Every one of
+    Casdoor's 139 results was absolute.
+
+    Noir echoes back whatever base path it was given, so the path is absolute
+    whenever the scan was. The source root the endpoint came from is the right
+    thing to hang it off -- that is the directory the user named, and in CI it
+    is the checkout. The working directory is the fallback for a path from
+    somewhere else, and an absolute URI the last resort, since inventing a
+    relative path for a file outside every root would be a claim about a
+    repository layout that does not exist.
+
+    Either way a file path is not a URI -- a space or a `#` in a name has to
+    be escaped, or the reference is not one.
     """
     location = Path(path)
     if not location.is_absolute():
         return quote(location.as_posix(), safe="/")
-    try:
-        return quote(location.relative_to(Path.cwd()).as_posix(), safe="/")
-    except ValueError:
-        return location.as_uri()
+
+    for base in (Path(root) if root else None, Path.cwd()):
+        if base is None:
+            continue
+        try:
+            return quote(location.relative_to(base).as_posix(), safe="/")
+        except ValueError:
+            continue
+    return location.as_uri()
 
 
 def _message(finding: Finding) -> str:
