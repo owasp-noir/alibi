@@ -129,12 +129,20 @@ def render(
             f"{misses} endpoint{'s' if misses != 1 else ''} nearly matched another view "
             f"-- these may be matching failures, not real gaps", "medium"))
 
+    # Before the early return, not after it: "no disagreement" is exactly the
+    # sentence this warning has to interrupt.
+    _render_conflated(index, paint, out)
+
     if not findings:
         out()
         # "Nothing to report" and "the comparison never ran" look identical from
         # the outside and mean opposite things, so only claim agreement when a
         # rule actually compared something.
-        if suppressed:
+        if index.conflated():
+            out("  " + paint(
+                "Nothing to report from this comparison -- but see above.",
+                "medium"))
+        elif suppressed:
             out("  " + paint(
                 f"Nothing left to report -- {len(suppressed)} finding"
                 f"{'s' if len(suppressed) != 1 else ''} suppressed. See below.", "dim"))
@@ -264,7 +272,40 @@ def _shorten(path: str) -> str:
     try:
         return str(Path(path).relative_to(Path.cwd()))
     except ValueError:
-        return Path(path).name
+        pass
+
+    # Outside the working directory: keep the tail, which is what distinguishes
+    # one service's contracts from another's, rather than the machine-specific
+    # head that does not.
+    parts = Path(path).parts
+    return str(Path(*parts[-3:])) if len(parts) > 3 else path
+
+
+def _render_conflated(index: Index, paint: Painter, out) -> None:
+    """Warn when one scan looks like it is holding several services.
+
+    This one hides findings rather than inventing them, which is the direction
+    worth interrupting for: the reader would otherwise see "no disagreement"
+    and believe it.
+    """
+    conflated = index.conflated()
+    if not conflated:
+        return
+
+    out()
+    out(paint("SEVERAL SERVICES IN ONE SCAN?", "high"))
+    out(paint(f"  {len(conflated)} endpoint"
+              f"{'s are' if len(conflated) != 1 else ' is'} claimed by contracts "
+              f"in different directories. If those are\n  separate services, one "
+              f"service's implementation is corroborating another's contract,\n"
+              f"  and findings on both are disappearing. Scan them separately "
+              f"to be sure.", "dim"))
+    for key, directories in conflated[:5]:
+        out(paint(f"    {key}", "dim"))
+        for directory in directories:
+            out(paint(f"      {_shorten(directory)}", "dim"))
+    if len(conflated) > 5:
+        out(paint(f"    ... and {len(conflated) - 5} more (-f json)", "dim"))
 
 
 def _render_scope_hint(hint: Hint | None, paint: Painter, out) -> None:

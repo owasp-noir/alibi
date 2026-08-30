@@ -40,6 +40,10 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             },
         },
         "scope_hint": _hint(suggest(index, findings, ruleset)),
+        "conflated": [
+            {"endpoint": str(key), "contract_directories": directories}
+            for key, directories in index.conflated()
+        ],
         "findings": [_finding(f) for f in findings],
         "skipped_rules": [
             {"rule": s.rule_id, "reason": s.reason, "detail": s.detail}

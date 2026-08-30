@@ -14,6 +14,7 @@ near miss before it is allowed to become a finding.
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import PurePosixPath
 from dataclasses import dataclass, field
 
 from .collect import RawEndpoint
@@ -168,6 +169,41 @@ class Index:
     @property
     def near_miss_count(self) -> int:
         return sum(1 for e in self.entries.values() if e.near_misses)
+
+    def conflated(self) -> list[tuple[Key, list[str]]]:
+        """Endpoints two separate contracts both claim.
+
+        A monorepo holds several surfaces, and this tool compares views of one.
+        Scan `services/billing` and `services/search` together and their two
+        `/health` endpoints become a single key: billing's implementation
+        corroborates search's contract, and search's unimplemented `/health`
+        stops being reported. Scanned apart, it is a PHANTOM.
+
+        That is the dangerous direction -- a finding disappearing rather than a
+        false one appearing -- so it is worth saying even though the tool
+        cannot fix it. Two contracts in *different directories* claiming one
+        path is the tell: measured across Casdoor, NetBox, Directus and
+        authentik it fires on none of them, and Casdoor ships the same
+        specification as both `.json` and `.yml` in one directory, which is why
+        the directory rather than the file is what counts.
+
+        It does not catch every shape. One service implementing a path that
+        only another documents leaves a single contract behind it, and no
+        signal here. Catching that would mean inferring where one service ends
+        and the next begins, which is a guess this tool does not make.
+        """
+        found: list[tuple[Key, list[str]]] = []
+        for entry in self.entries.values():
+            directories = {
+                str(PurePosixPath(code_path["path"]).parent)
+                for observation in entry.observations
+                if observation.view == "doc"
+                for code_path in observation.raw.code_paths
+                if code_path.get("path")
+            }
+            if len(directories) > 1:
+                found.append((entry.key, sorted(directories)))
+        return found
 
     def coverage_stats(self, target: str = "code") -> dict[str, tuple[int, int, int]]:
         """Per routing view: how many rules, how much of `target` they reach.

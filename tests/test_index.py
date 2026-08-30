@@ -297,3 +297,48 @@ def test_coverage_is_measured_once_however_often_it_is_asked_for(
 
     assert calls == ["code"]
     assert index.coverage_stats() == first
+
+
+def test_two_contracts_claiming_one_path_are_reported(endpoint, view_map):
+    """A monorepo holds several surfaces; this tool compares views of one.
+
+    Scan `services/billing` and `services/search` together and their two
+    `/health` endpoints become one key -- billing's implementation corroborates
+    search's contract, and search's unimplemented `/health` stops being
+    reported. Scanned apart it is a PHANTOM. A finding disappearing is the
+    dangerous direction, so it is worth saying even though the tool cannot fix
+    it.
+    """
+    endpoints = [
+        endpoint("/health", "GET", "python_flask",
+                 code_paths=({"path": "services/billing/app/main.py", "line": 4},)),
+        endpoint("/health", "GET", "oas3",
+                 code_paths=({"path": "services/billing/contracts/openapi.yaml"},)),
+        endpoint("/health", "GET", "oas3",
+                 code_paths=({"path": "services/search/contracts/openapi.yaml"},)),
+    ]
+
+    index = build(endpoints, view_map)
+    conflated = index.conflated()
+
+    assert len(conflated) == 1
+    key, directories = conflated[0]
+    assert str(key) == "GET /health"
+    assert directories == [
+        "services/billing/contracts", "services/search/contracts"]
+
+
+def test_one_specification_in_two_formats_is_not_two_services(endpoint, view_map):
+    """Casdoor ships its specification as both `.json` and `.yml`.
+
+    Counting files rather than directories flagged 235 of its endpoints.
+    """
+    endpoints = [
+        endpoint("/api/thing", "GET", "python_flask"),
+        endpoint("/api/thing", "GET", "oas3",
+                 code_paths=({"path": "swagger/swagger.json"},
+                             {"path": "swagger/swagger.yml"})),
+    ]
+
+    index = build(endpoints, view_map)
+    assert index.conflated() == []
