@@ -190,3 +190,40 @@ def test_many_different_paths_beneath_one_still_reads_as_a_mount(endpoint, view_
 
     assert any("mount" in nm.reason for nm in mount.near_misses)
     assert "6 paths" in next(nm.reason for nm in mount.near_misses if "mount" in nm.reason)
+
+
+def test_each_named_path_reports_what_it_contributed(endpoint, view_map):
+    """Passing two paths and being told "no doc source" is not enough.
+
+    The reader cannot tell which of the two came back empty -- whether they
+    named the wrong directory, or noir does not read the format their contract
+    is written in.
+    """
+    endpoints = [
+        endpoint("/a", "GET", "python_flask", source="service"),
+        endpoint("/b", "GET", "python_flask", source="service"),
+        endpoint("/a", "GET", "oas3", source="contracts"),
+    ]
+
+    index = build(endpoints, view_map)
+    rows = index.by_source(["service", "contracts", "captures"])
+
+    assert rows == [
+        ("service", 2, ["code"]),
+        ("contracts", 1, ["doc"]),
+        ("captures", 0, []),
+    ]
+
+
+def test_a_source_count_never_exceeds_the_total(endpoint, view_map):
+    """Sightings would; distinct endpoints do not, and a row above the total
+    only looks broken."""
+    endpoints = [
+        endpoint("/same", "GET", "python_flask", source="service"),
+        endpoint("/same", "GET", "go_http", source="service"),
+    ]
+
+    index = build(endpoints, view_map)
+    (_, count, _), = index.by_source(["service"])
+
+    assert count == len(index.entries) == 1

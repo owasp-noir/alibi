@@ -111,6 +111,28 @@ class Index:
     def by_view(self, view: str) -> list[Entry]:
         return [e for e in self.entries.values() if view in e.views]
 
+    def by_source(self, sources: list[str]) -> list[tuple[str, int, list[str]]]:
+        """What each path the user named actually contributed.
+
+        Passing two paths and getting "no doc source in this scan" leaves the
+        reader unable to tell which one came back empty -- whether they named
+        the wrong directory, or noir does not recognise the format their
+        contract is written in. Naming the silent source answers that.
+        """
+        # Distinct endpoints, not sightings. Two sources can contribute the
+        # same endpoint, so these do not sum to the total -- but each row
+        # answers "how many endpoints did this path contribute", which is what
+        # the reader is asking, and a row that read higher than the total
+        # would only look broken.
+        keys: dict[str, set[Key]] = {name: set() for name in sources}
+        views: dict[str, set[str]] = {name: set() for name in sources}
+        for entry in self.entries.values():
+            for obs in entry.observations:
+                keys.setdefault(obs.raw.source, set()).add(entry.key)
+                views.setdefault(obs.raw.source, set()).add(obs.view)
+        return [(name, len(keys.get(name, ())), sorted(views.get(name, ())))
+                for name in sources]
+
     def keys_in(self, view: str) -> list[Key]:
         return [e.key for e in self.entries.values() if view in e.views]
 

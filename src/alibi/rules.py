@@ -59,12 +59,19 @@ class Finding:
 # gateway demonstrably does not front this codebase.
 THIN_COVERAGE = 0.25
 
-# Below this, a view is too small for its isolation to mean anything -- two
-# endpoints that happen to miss each other are not evidence of a broken
-# comparison. The check is on the *larger* of the two populations: a view with
-# forty documented endpoints that shares none of them is the surprising thing,
-# however little the other side happens to hold.
-MIN_POPULATION_FOR_OVERLAP = 5
+# How many findings a disconnected rule has to be about to produce before
+# holding it back does more good than harm.
+#
+# This guard exists to stop a flood -- "every endpoint would qualify" is what
+# its own message says -- so it is keyed on the size of the flood rather than
+# on how many endpoints the views hold. Keying it on population put a cliff in
+# the middle of ordinary work: a five-endpoint project gained one route, its
+# code view crossed the line, and DRIFT switched off. The next `alibi history`
+# then reported the rule as no longer compared, over one added endpoint.
+#
+# Below this, letting the findings through costs a handful of lines and keeps
+# behaviour stable; above it, the report is unreadable without the guard.
+MAX_UNCORROBORATED_FINDINGS = 10
 
 
 @dataclass
@@ -127,20 +134,30 @@ class RuleSet:
                 ))
                 continue
 
-            disconnected = self._disconnected(index, rule)
-            if disconnected:
-                skipped.append(disconnected)
-                continue
-
             runnable.append(rule)
 
+        per_rule: dict[str, list[Finding]] = {rule["id"]: [] for rule in runnable}
         for entry in index.entries.values():
             for rule in runnable:
                 if not self._matches(entry, rule, index):
                     continue
                 if self._suppressed(entry, index):
                     continue
-                findings.append(self._build(entry, rule, signals, index))
+                per_rule[rule["id"]].append(
+                    self._build(entry, rule, signals, index))
+
+        # Whether the views connected is only worth acting on once it is known
+        # how much the answer costs. A rule producing three findings from
+        # unconnected views is three lines; one producing three hundred is the
+        # report.
+        for rule in runnable:
+            produced = per_rule[rule["id"]]
+            if len(produced) > MAX_UNCORROBORATED_FINDINGS:
+                disconnected = self._disconnected(index, rule)
+                if disconnected:
+                    skipped.append(disconnected)
+                    continue
+            findings.extend(produced)
 
         findings.sort(
             key=lambda f: (-self.severities.index(f.severity), f.key.path, f.key.method)
@@ -168,8 +185,6 @@ class RuleSet:
         left, right = views
         left_size = index.population(left)
         right_size = index.population(right)
-        if max(left_size, right_size) < MIN_POPULATION_FOR_OVERLAP:
-            return None
 
         # Two endpoint sets connect by sharing members. A routing view connects
         # by reaching them -- one `location /api/` legitimately shares no key

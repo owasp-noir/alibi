@@ -83,6 +83,9 @@ def render(
         f"{view} {paint(str(count), 'bold')}"
         for view, count in sorted(view_counts.items(), key=lambda kv: -kv[1])
     ))
+
+    if len(sources) > 1:
+        _render_sources(index, sources, paint, out)
     out()
     out("  " + paint(f"{index.corroborated} corroborated", "ok")
         + paint(" -- vouched for by more than one view", "dim"))
@@ -169,6 +172,23 @@ def render(
     _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)
     out()
+
+
+def _render_sources(index: Index, sources: list[str], paint: Painter, out) -> None:
+    """Which named path produced which view, and which produced nothing."""
+    rows = index.by_source(sources)
+    width = max(len(name) for name, _, _ in rows)
+    silent = [name for name, count, _ in rows if count == 0]
+
+    out()
+    for name, count, views in rows:
+        described = ", ".join(views) if views else paint("nothing noir recognised", "medium")
+        out(paint(f"  {name:<{width}}  {count:>5}  ", "dim") + described)
+
+    if silent:
+        out(paint(f"  Check {'that path' if len(silent) == 1 else 'those paths'} "
+                  f"-- either it is not where you meant, or noir does not read "
+                  f"the format there.", "dim"))
 
 
 def _breakdown(group: list[Finding], paint: Painter) -> str:

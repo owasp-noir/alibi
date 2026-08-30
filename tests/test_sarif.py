@@ -210,8 +210,8 @@ def test_a_rule_that_never_ran_is_reported_rather_than_dropped(endpoint, view_ma
     consumer seeing an empty results array would read that as agreement, which
     is the one conclusion the whole tool is built to refuse.
     """
-    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(8)]
-    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(8)]
+    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(15)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(15)]
 
     document = emit(endpoints, view_map)
 

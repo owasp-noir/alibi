@@ -22,14 +22,17 @@ def render(history: History, severities: list[str], stream=None) -> None:
     if history.previous_at is None:
         # The same refusal the rules make when a view is missing: nothing was
         # compared, so nothing is reported as new.
-        out("  " + paint(history.current_at, "bold"))
+        out("  " + paint(f"scan {history.current_scan}", "bold")
+            + paint(f"  {history.current_at}", "dim"))
         out("  " + paint("The first recorded scan. Nothing to compare it "
                          "against yet.", "dim"))
         out()
         return
 
-    out(f"  {paint(history.current_at, 'bold')}"
-        + paint(f"  compared against  {history.previous_at}", "dim"))
+    out(f"  {paint(f'scan {history.current_scan}', 'bold')}"
+        + paint(f"  {history.current_at}", "dim")
+        + paint(f"   compared against   scan {history.previous_scan}", "dim")
+        + paint(f"  {history.previous_at}", "dim"))
 
     _render_not_compared(history, paint, out)
 

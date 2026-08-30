@@ -179,8 +179,8 @@ def test_views_that_never_met_hold_the_rules_back(endpoint, view_map):
     corroboration between two populated views means the comparison did not
     work, and reporting hundreds of findings on top of it buries that.
     """
-    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(8)]
-    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(8)]
+    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(15)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(15)]
 
     findings, skipped = evaluate(endpoints, view_map)
 
@@ -190,8 +190,8 @@ def test_views_that_never_met_hold_the_rules_back(endpoint, view_map):
 
 
 def test_one_shared_endpoint_is_enough_to_trust_the_comparison(endpoint, view_map):
-    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(8)]
-    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(8)]
+    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(15)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(15)]
     endpoints += [
         endpoint("/shared", "GET", "python_flask"),
         endpoint("/shared", "GET", "oas3"),
@@ -200,7 +200,7 @@ def test_one_shared_endpoint_is_enough_to_trust_the_comparison(endpoint, view_ma
     findings, skipped = evaluate(endpoints, view_map)
 
     assert reasons(skipped, "SHADOW", "PHANTOM") == set()
-    assert len(findings) == 16
+    assert len(findings) == 30
 
 
 def test_a_tiny_scan_is_not_second_guessed(endpoint, view_map):
@@ -226,12 +226,15 @@ def test_a_populated_view_sharing_nothing_is_disconnected_however_small_the_othe
     fact, and reporting 44 findings on top of it says nothing.
     """
     endpoints = [endpoint("/only-code", "GET", "go_http")]
-    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(12)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(15)]
 
     findings, skipped = evaluate(endpoints, view_map)
 
-    assert findings == []
-    assert reasons(skipped, "SHADOW", "PHANTOM") == {"no-overlap"}
+    # PHANTOM would flood, so it is held back. SHADOW would produce exactly one
+    # finding, which costs a line and is left alone -- the guard is about the
+    # size of the flood, not about the populations behind it.
+    assert reasons(skipped, "PHANTOM") == {"no-overlap"}
+    assert [f.key.path for f in findings] == ["/only-code"]
 
 
 # --- the traffic, gateway and infrastructure rules ---------------------------
@@ -436,3 +439,26 @@ def test_an_unknown_condition_is_refused_rather_than_matching_everything(
 
     with pytest.raises(ValueError, match="unknown condition tag_machting"):
         ruleset.evaluate(index, views)
+
+
+def test_one_added_endpoint_does_not_switch_a_rule_off(endpoint, view_map):
+    """The cliff that made `alibi history` report churn nobody caused.
+
+    The guard used to key on how many endpoints the views held, so a project
+    of four routes that gained a fifth crossed the line and DRIFT stopped
+    running. The next history call reported it as no longer compared, over one
+    added route. Keying on how many findings the rule would actually produce
+    ties the guard to the flood it exists to prevent.
+    """
+    infra = [endpoint("/ghost-function", "GET", "terraform")]
+
+    def drift_ran(count):
+        endpoints = infra + [
+            endpoint(f"/app/route{i}", "GET", "python_flask") for i in range(count)
+        ]
+        findings, skipped = evaluate(endpoints, view_map)
+        return "DRIFT" in {f.rule_id for f in findings}
+
+    assert drift_ran(4) is True
+    assert drift_ran(5) is True
+    assert drift_ran(20) is True

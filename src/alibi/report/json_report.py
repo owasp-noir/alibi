@@ -18,7 +18,10 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             view_counts[view] = view_counts.get(view, 0) + 1
 
     return {
-        "sources": sources,
+        "sources": [
+            {"name": name, "endpoints": count, "views": views}
+            for name, count, views in index.by_source(sources)
+        ],
         "scan_errors": [
             {"tech": e.tech, "message": e.message, "source": e.source}
             for e in errors

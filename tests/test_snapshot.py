@@ -381,3 +381,29 @@ def _evaluate(endpoints, view_map):
     held_back = {item.rule_id for item in skipped}
     ran = [r["id"] for r in ruleset.rules if r["id"] not in held_back]
     return index, findings, ran
+
+
+def test_two_scans_a_second_apart_are_still_told_apart(tmp_path, endpoint, view_map):
+    """"07:00:55Z compared against 07:00:55Z" names neither scan.
+
+    Which is every run in CI and every run while iterating -- the timestamps
+    are identical because the scans are, so the ordinal has to carry it.
+    """
+    db = tmp_path / "snapshots.db"
+    same_second = "2026-08-30T07:00:55Z"
+
+    for _ in range(2):
+        index, findings, ran = _evaluate(
+            [
+                endpoint("/undocumented", "GET", "python_flask"),
+                endpoint("/anchor", "GET", "oas3"),
+                endpoint("/anchor", "GET", "python_flask"),
+            ],
+            view_map,
+        )
+        snapshot.record(db, index, findings, ["s"], ran, when=same_second)
+
+    history = snapshot.history(db)
+
+    assert history.current_at == history.previous_at == same_second
+    assert (history.current_scan, history.previous_scan) == (2, 1)

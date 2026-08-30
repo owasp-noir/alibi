@@ -146,6 +146,11 @@ class History:
     # Rules that ran in the earlier scan and not in this one. Their findings
     # are neither new nor resolved -- they were not looked for.
     not_compared: list[str] = dataclass_field(default_factory=list)
+    # Scan ordinals. Two scans a second apart carry the same timestamp, and a
+    # header reading "07:00:55Z compared against 07:00:55Z" cannot say which is
+    # which -- which is every run in CI, and every run while iterating.
+    current_scan: int = 0
+    previous_scan: int | None = None
 
 
 def record(db_path: Path | str, index: Index, findings: list[Finding],
@@ -212,7 +217,9 @@ def history(db_path: Path | str) -> History:
         # findings as "new" would be the same overclaim the rules refuse to
         # make when a view is missing: nothing was compared, so nothing is new.
         if len(scans) == 1:
-            return History(path, total, current_at, None, [], [])
+            return History(path=path, scans=total, current_at=current_at,
+                           previous_at=None, new=[], resolved=[],
+                           current_scan=total)
 
         previous_id, previous_at = scans[1]
 
@@ -230,6 +237,8 @@ def history(db_path: Path | str) -> History:
             scans=total,
             current_at=current_at,
             previous_at=previous_at,
+            current_scan=total,
+            previous_scan=total - 1,
             new=_difference(conn, current_id, previous_id, comparable),
             resolved=_difference(conn, previous_id, current_id, comparable),
             not_compared=stopped,

@@ -67,13 +67,14 @@ def test_a_distinctive_reason_is_printed(endpoint, view_map):
 
 def test_rules_held_back_for_one_reason_are_explained_once(endpoint, view_map):
     """Printing the same five lines under each rule buries the explanation."""
-    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(8)]
-    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(8)]
+    endpoints = [endpoint(f"/code/{i}", "GET", "python_flask") for i in range(15)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(15)]
 
     output = render(endpoints, view_map)
 
     assert "SHADOW, PHANTOM held back" in output
-    assert output.count("the two views\n  never met") == 1
+    # One word from the explanation, chosen so line wrapping cannot split it.
+    assert output.count("never") == 1
 
 
 def test_a_skip_that_cost_nothing_does_not_raise_the_alarm(endpoint, view_map):
