@@ -75,6 +75,7 @@ SHADOW  Shadow API -- Implemented, but no contract describes it
 
 ```console
 $ alibi scan ./service ./contracts -f json --fail-on high    # for CI
+$ alibi scan ./service ./contracts -f sarif                  # for GitHub code scanning
 $ alibi doctor                                               # view map vs. your noir build
 ```
 

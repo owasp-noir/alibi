@@ -7,7 +7,7 @@ import sys
 
 from . import collect
 from .index import build as build_index
-from .report import json_report, text
+from .report import json_report, sarif, text
 from .rules import RuleSet
 from .views import ViewMap
 
@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     scan = sub.add_parser("scan", help="scan sources and report where the views disagree")
     scan.add_argument("paths", nargs="+", metavar="PATH",
                       help="anything noir can read: a codebase, a spec directory, a capture file")
-    scan.add_argument("-f", "--format", choices=["text", "json"], default="text")
+    scan.add_argument("-f", "--format", choices=["text", "json", "sarif"], default="text")
     scan.add_argument("--noir-bin", help="path to the noir binary (default: found on PATH)")
     scan.add_argument("--views", help="alternative views.yml")
     scan.add_argument("--rules", help="alternative rules.yml")
@@ -80,6 +80,8 @@ def _scan(args) -> int:
 
     if args.format == "json":
         print(json_report.dump(index, findings, skipped, names))
+    elif args.format == "sarif":
+        print(sarif.dump(index, findings, skipped, names, rules))
     else:
         text.render(index, findings, skipped, rules, names)
 

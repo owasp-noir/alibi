@@ -1,15 +1,17 @@
 """One test that actually runs noir, because everything else mocks it away."""
 
+import json
 from pathlib import Path
 
 import pytest
 
-from alibi import collect
+from alibi import cli, collect
 from alibi.index import build
 from alibi.rules import RuleSet
 from alibi.views import ViewMap
 
 FIXTURE = Path(__file__).parent / "fixtures" / "matched"
+SARIF_SCHEMA = Path(__file__).parent / "fixtures" / "sarif-schema-2.1.0.json"
 
 
 def _noir():
@@ -43,6 +45,26 @@ def test_a_real_scan_matches_across_the_notation_boundary():
     assert reported == {
         ("SHADOW", "GET", "/internal/metrics"),
         ("PHANTOM", "GET", "/reports/{}"),
+    }
+
+
+@requires_noir
+def test_sarif_from_a_real_scan_validates(capsys):
+    """Hand-built findings cannot produce the paths noir actually emits.
+
+    Every other SARIF test writes its own code paths. This one takes whatever
+    noir reports for a real tree -- the base path it was handed, a
+    specification with no line number -- and holds the result to the schema.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+
+    assert cli.main(["scan", str(FIXTURE), "-f", "sarif"]) == cli.EXIT_OK
+
+    document = json.loads(capsys.readouterr().out)
+    schema = json.loads(SARIF_SCHEMA.read_text(encoding="utf-8"))
+    assert list(jsonschema.Draft4Validator(schema).iter_errors(document)) == []
+    assert {r["ruleId"] for r in document["runs"][0]["results"]} == {
+        "SHADOW", "PHANTOM"
     }
 
 
