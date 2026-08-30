@@ -107,7 +107,7 @@ Findings say how the match was made:
 
 ## What keeps it honest
 
-A tool like this dies by reporting hundreds of findings on its first run. Four
+A tool like this dies by reporting hundreds of findings on its first run. Five
 things push back:
 
 **Rules do not fire without both views.** Scan a codebase with no contracts
@@ -133,6 +133,12 @@ for the routes beneath it, or a stack noir could not read — so the rules are
 held back and the reason is printed instead. Paths that turn out to have many
 endpoints from other views beneath them are labelled as probable mounts.
 
+**A missing view and an empty one mean opposite things.** Noir reports what it
+could not read, and alibi prints that above the findings. NetBox ships a 12.35MB
+OpenAPI document with 308 paths; noir skips it for exceeding its file-size cap,
+and without that report alibi states the project documents nothing — not merely
+incomplete, but the wrong answer stated confidently.
+
 **An absence is only evidence when the signal exists.** Noir's auth taggers
 cover the frameworks they know. In a stack they do not cover, nothing carries an
 auth tag, and treating that as "unauthenticated" would promote every finding and
@@ -143,19 +149,72 @@ require that tag to appear somewhere in the scan first.
 
 | Rule | Condition | Severity |
 | --- | --- | --- |
+| `ORPHAN` | taking real requests, absent from the code | high |
+| `LIVE_UNDOC` | taking real requests, described by no contract | high |
 | `SHADOW` | in code, not in any contract | medium |
+| `DANGLING` | a gateway rule that reaches nothing implemented | medium |
+| `DRIFT` | declared for deployment, missing from the code | medium |
 | `PHANTOM` | in a contract, not in the code | low |
+| `UNEXPOSED` | implemented, but no gateway rule reaches it | low |
+| `COLD` | implemented, never seen taking a request | info |
 
 Severity then shifts on what noir's taggers found: personal data, file uploads,
 no sign of authentication, or a method that changes state.
 
 Both the view map (`views.yml`) and the rules (`rules.yml`) are data, not code.
-Adding the traffic, gateway and infra rules is a matter of editing YAML.
+
+### Gateways are not endpoint lists
+
+One `location /api/` stands for everything beneath it, so gateway and
+infrastructure rules answer *does this reach that endpoint* rather than *does
+this contain it*. Compared as sets, every prefix rule looks like a route nobody
+implemented and every implemented route looks unreachable.
+
+Coverage is deliberately generous. Noir reports the path a rule matches but not
+whether it matches as a prefix or exactly (`location = /x`, an Ingress
+`pathType: Exact`), so exactness cannot be recovered — and treating every rule
+as a prefix suppresses findings rather than inventing them.
+
+The report says how much of the code each routing view reaches, because whether
+"34 endpoints no gateway reaches" is real depends on whether that config is the
+one fronting the service. No threshold separates those honestly: Argo CD's e2e
+test fixture reaches 39% of its code and NetBox's real config reaches 100%.
+
+### Traffic has to have been watched
+
+A HAR capture records requests that happened. A Postman collection records
+requests somebody meant to make. `ORPHAN`, `LIVE_UNDOC` and `COLD` all reason
+about what ran, so they require a view somebody actually watched and say so
+when they sit out.
+
+### Non-web surface stays out
+
+Noir reports CLI arguments, Kafka topics and mobile deep links in the same
+list. `cli://gitops-engine/agent` flattened into HTTP becomes `/agent` — it
+collides with any web route of that name and gets asked whether a gateway
+routes to it. The protocol belongs to the endpoint's identity; `http` and
+`https` are one space and everything else keeps its own.
+
+## Suppression
+
+Some gaps are the intended state. Put an `.alibi.yml` beside the source:
+
+```yaml
+ignore:
+  - path: "^/internal/"
+    why: internal-only admin surface
+  - rule: UNEXPOSED
+    path: "^/debug/"
+    why: not fronted by the gateway in this repo
+```
+
+Or pass `--ignore REGEX` for a one-off. Suppressed findings are counted and the
+count is printed — a tool that quietly drops findings is worse than one that
+prints too many, because there is no longer any way to tell what it withheld.
 
 ## Status
 
-Early. Only `code` and `doc` rules are implemented; the other three views are
-mapped and collected but nothing compares them yet.
+Early, but all five views are compared.
 
 Measured against five repositories:
 

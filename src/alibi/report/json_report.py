@@ -9,7 +9,7 @@ from ..rules import Finding, Skipped
 
 
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
-          sources: list[str], errors: list = ()) -> dict:
+          sources: list[str], errors: list = (), suppressed: list = ()) -> dict:
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
         for view in entry.views:
@@ -27,6 +27,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             "findings": len(findings),
             "near_misses": index.near_miss_count,
             "degraded": bool(errors),
+            "suppressed": len(suppressed),
             "views": view_counts,
             "coverage": {
                 view: {"rules": rules, "reaches": reached, "of": total}
@@ -37,6 +38,11 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
         "skipped_rules": [
             {"rule": s.rule_id, "reason": s.reason, "detail": s.detail}
             for s in skipped
+        ],
+        "suppressed": [
+            {"rule": f.rule_id, "method": f.key.method, "path": f.key.path,
+             "why": entry.why}
+            for f, entry in suppressed
         ],
         "review": [
             {
@@ -81,5 +87,6 @@ def _finding(finding: Finding) -> dict:
 
 
 def dump(index: Index, findings: list[Finding], skipped: list[Skipped],
-         sources: list[str], errors: list = ()) -> str:
-    return json.dumps(build(index, findings, skipped, sources, errors), indent=2)
+         sources: list[str], errors: list = (), suppressed: list = ()) -> str:
+    return json.dumps(
+        build(index, findings, skipped, sources, errors, suppressed), indent=2)

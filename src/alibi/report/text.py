@@ -45,6 +45,7 @@ def render(
     rules: RuleSet,
     sources: list[str],
     errors: list = (),
+    suppressed: list = (),
     stream=sys.stdout,
 ) -> None:
     paint = Painter(_use_color(stream))
@@ -100,7 +101,11 @@ def render(
         # "Nothing to report" and "the comparison never ran" look identical from
         # the outside and mean opposite things, so only claim agreement when a
         # rule actually compared something.
-        if any(s.reason == "no-overlap" for s in skipped):
+        if suppressed:
+            out("  " + paint(
+                f"Nothing left to report -- {len(suppressed)} finding"
+                f"{'s' if len(suppressed) != 1 else ''} suppressed. See below.", "dim"))
+        elif any(s.reason == "no-overlap" for s in skipped):
             out("  " + paint("No findings -- but nothing was compared. See below.", "medium"))
         elif skipped and len(skipped) == len(rules.rules):
             out("  " + paint("No rule had the views it needs. See below.", "dim"))
@@ -122,6 +127,7 @@ def render(
             _render_finding(finding, paint, out)
 
     _render_near_misses(index, paint, out)
+    _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)
     out()
 
@@ -197,6 +203,20 @@ def _render_near_misses(index: Index, paint: Painter, out) -> None:
                   f"-- {near.reason}", "dim"))
     if len(flagged) > 20:
         out(paint(f"  ... and {len(flagged) - 20} more", "dim"))
+
+
+def _render_suppressed(suppressed: list, paint: Painter, out) -> None:
+    """Say how much was silenced. Never silence silently."""
+    if not suppressed:
+        return
+    out()
+    reasons: dict[str, int] = {}
+    for _, entry in suppressed:
+        reasons[entry.why or "no reason given"] = reasons.get(entry.why or "no reason given", 0) + 1
+    out(paint(f"{len(suppressed)} finding"
+              f"{'s' if len(suppressed) != 1 else ''} suppressed", "dim"))
+    for why, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        out(paint(f"  {count:>4}  {why}", "dim"))
 
 
 def _render_skipped(skipped: list[Skipped], paint: Painter, out) -> None:

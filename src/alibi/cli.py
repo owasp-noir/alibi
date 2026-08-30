@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from . import collect
+from .ignore import IgnoreList
 from .index import build as build_index
 from .report import json_report, text
 from .rules import RuleSet
@@ -35,6 +36,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="exit non-zero when a finding reaches this severity")
     scan.add_argument("--noir-arg", action="append", default=[], metavar="ARG",
                       help="extra argument passed through to noir (repeatable)")
+    scan.add_argument("--ignore", action="append", default=[], metavar="REGEX",
+                      help="suppress findings whose path matches (repeatable)")
+    scan.add_argument("--ignore-file", metavar="FILE",
+                      help="suppression list (default: .alibi.yml beside the source)")
 
     doctor = sub.add_parser(
         "doctor", help="check the view map against this noir build's catalog")
@@ -79,10 +84,15 @@ def _scan(args) -> int:
     present_views = {view for entry in index.entries.values() for view in entry.views}
     findings, skipped = rules.evaluate(index, present_views)
 
+    ignores = (IgnoreList.load(args.ignore_file) if args.ignore_file
+               else IgnoreList.discover(args.paths))
+    ignores = ignores.extend(IgnoreList.from_patterns(args.ignore))
+    findings, suppressed = ignores.apply(findings)
+
     if args.format == "json":
-        print(json_report.dump(index, findings, skipped, names, errors))
+        print(json_report.dump(index, findings, skipped, names, errors, suppressed))
     else:
-        text.render(index, findings, skipped, rules, names, errors)
+        text.render(index, findings, skipped, rules, names, errors, suppressed)
 
     if args.fail_on:
         threshold = rules.severities.index(args.fail_on)

@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The floor and the current release. Between them sit the features this
+        # codebase actually uses; anything that breaks on one and not the other
+        # is a version assumption worth catching here rather than in a report.
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e .
+          uv pip install pytest
+
+      # Most of the suite runs without noir; the end-to-end tests skip
+      # themselves when it is absent, which is why it is not installed here.
+      # A scheduled job against a real noir build belongs in a separate
+      # workflow, so a missing release never blocks a pull request.
+      - name: Test
+        run: .venv/bin/python -m pytest tests/ -q
