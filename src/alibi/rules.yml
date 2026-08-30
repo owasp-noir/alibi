@@ -163,6 +163,10 @@ adjustments:
     when: { method_in: [POST, PUT, PATCH, DELETE, QUERY] }
     shift: +1
     why: changes state rather than reading it
+    # The method sits in the row already, so printing the reason beside it adds
+    # a line per finding and no information. Kept in `-f json`, where nothing
+    # is beside it.
+    restates: method
 
   - id: thin-routing
     when: { thin_routing_view: true }

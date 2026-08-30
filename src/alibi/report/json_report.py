@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from ..index import Index
+from ..scope import suggest
 from ..rules import Finding, Skipped
 
 
@@ -34,6 +35,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                 for view, (rules, reached, total) in index.coverage_stats().items()
             },
         },
+        "scope_hint": _hint(suggest(index, findings)),
         "findings": [_finding(f) for f in findings],
         "skipped_rules": [
             {"rule": s.rule_id, "reason": s.reason, "detail": s.detail}
@@ -60,6 +62,19 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             for entry in index.entries.values()
             if entry.near_misses
         ],
+    }
+
+
+def _hint(hint) -> dict | None:
+    if hint is None:
+        return None
+    return {
+        "view": hint.view,
+        "prefix": hint.prefix,
+        "concentration": round(hint.concentration, 3),
+        "findings_inside": hint.inside,
+        "findings_outside": hint.outside,
+        "ignore_pattern": hint.ignore_pattern,
     }
 
 

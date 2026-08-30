@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 
 from ..index import GRADE_LONE, Index
+from ..scope import Hint, suggest
 from ..rules import Finding, RuleSet, Skipped
+
+# How many findings of one kind to print before saying how many are left.
+GROUP_LIMIT = 12
 
 _COLORS = {
     "critical": "\x1b[1;31m",
@@ -78,13 +82,25 @@ def render(
     # Anything noir could not read goes above the findings, because it changes
     # what the findings mean. A specification skipped for being too large reads
     # downstream as "this project documents nothing".
-    if errors:
+    lost = [e for e in errors if e.consequential]
+    declined = [e for e in errors if not e.consequential]
+
+    if lost:
         out()
         out(paint("NOIR COULD NOT READ EVERYTHING", "high"))
         out(paint("  Views below may be incomplete, and a missing view is not "
                   "the same as an empty one.", "dim"))
-        for error in errors:
+        for error in lost:
             out(paint(f"  [{error.tech}] {_wrap(_trim(error.message), indent='    ')}", "dim"))
+
+    if declined:
+        # Images, binaries and symlinks noir passed over on purpose. Worth
+        # recording, not worth alarming about -- an alarm for these teaches the
+        # reader to skip the one above.
+        out()
+        out(paint(f"  {len(declined)} note{'s' if len(declined) != 1 else ''}: "
+                  f"noir skipped media, binaries or symlinks (details in -f json)",
+                  "dim"))
 
     # The near-miss count is the tool's own error bar. It belongs next to the
     # totals, not buried under the findings, because every finding below is
@@ -121,15 +137,36 @@ def render(
         out()
         out(f"{paint(rule_id, 'bold')}  {head.name} "
             + paint(f"-- {head.summary}", "dim"))
-        out(paint(f"  {len(group)} finding{'s' if len(group) != 1 else ''}", "dim"))
+        out(paint(f"  {len(group)} finding{'s' if len(group) != 1 else ''}"
+                  f"{_breakdown(group, paint)}", "dim"))
         out()
-        for finding in group:
-            _render_finding(finding, paint, out)
 
+        # A report nobody scrolls to the end of is a report nobody reads. The
+        # group is already ordered worst-first, so the tail is the least
+        # informative part of it -- and the full list is one flag away.
+        for finding in group[:GROUP_LIMIT]:
+            _render_finding(finding, paint, out)
+        if len(group) > GROUP_LIMIT:
+            out(paint(f"  ... and {len(group) - GROUP_LIMIT} more "
+                      f"({rule_id} in full: -f json)", "dim"))
+
+    _render_scope_hint(suggest(index, findings), paint, out)
     _render_near_misses(index, paint, out)
     _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)
     out()
+
+
+def _breakdown(group: list[Finding], paint: Painter) -> str:
+    """The severity mix of a group, so a truncated list still says what it holds."""
+    counts: dict[str, int] = {}
+    for finding in group:
+        counts[finding.severity] = counts.get(finding.severity, 0) + 1
+    if len(counts) < 2:
+        return ""
+    order = ["critical", "high", "medium", "low", "info"]
+    parts = [f"{counts[s]} {s}" for s in order if s in counts]
+    return "  ·  " + ", ".join(parts)
 
 
 def _rule_order(findings: list[Finding]) -> list[str]:
@@ -150,10 +187,11 @@ def _render_finding(finding: Finding, paint: Painter, out) -> None:
         line += paint(f"   {where}", "dim")
     out(line)
 
-    if finding.adjustments:
-        reasons = " · ".join(a.why for a in finding.adjustments if a.why)
-        if reasons:
-            out(paint(f"           {reasons}", "dim"))
+    # A reason that only restates a column already on this row costs a line
+    # per finding and tells the reader nothing they cannot see.
+    distinctive = [a.why for a in finding.adjustments if a.why and not a.restates]
+    if distinctive:
+        out(paint(f"           {' · '.join(distinctive)}", "dim"))
 
     if finding.uncertain:
         near = finding.entry.near_misses[0]
@@ -184,6 +222,26 @@ def _shorten(path: str) -> str:
         return str(Path(path).relative_to(Path.cwd()))
     except ValueError:
         return Path(path).name
+
+
+def _render_scope_hint(hint: Hint | None, paint: Painter, out) -> None:
+    """Say where the contract's remit ends, without saying what to do about it.
+
+    Whether the findings outside it are a different surface or an undocumented
+    part of the same one is not something paths can answer -- so this reports
+    the measurement and the command, and leaves the judgement where it belongs.
+    """
+    if hint is None:
+        return
+    out()
+    out(paint("TWO SURFACES?", "bold"))
+    out(paint(f"  The {hint.view} view is {hint.share}% under {hint.prefix}, "
+              f"and {hint.outside} of these findings are outside it.", "dim"))
+    out(paint("  If that is a separate surface the contract never covered, "
+              "narrow the scan:", "dim"))
+    out(paint(f"    alibi scan <paths> --ignore '{hint.ignore_pattern}'", "dim"))
+    out(paint(f"  If it is the same surface left undocumented, they are the "
+              f"findings that matter most.", "dim"))
 
 
 def _render_near_misses(index: Index, paint: Painter, out) -> None:
@@ -232,15 +290,24 @@ def _render_skipped(skipped: list[Skipped], paint: Painter, out) -> None:
     if blocked:
         out()
         out(paint("THE VIEWS DID NOT CONNECT", "high"))
-        for item in blocked:
-            out(paint(f"  {item.rule_id} held back", "bold"))
-            out(paint(f"  {_wrap(item.detail)}", "dim"))
+        # Rules blocked for the same reason share one explanation. Printing the
+        # same five lines under each of them buries it by repeating it.
+        for detail, rules in _by_detail(blocked):
+            out(paint(f"  {', '.join(rules)} held back", "bold"))
+            out(paint(f"  {_wrap(detail)}", "dim"))
 
     if quiet:
         out()
-        out(paint("Rules that did not run", "dim"))
-        for item in quiet:
-            out(paint(f"  {item.rule_id:<12} {item.detail}", "dim"))
+        for detail, rules in _by_detail(quiet):
+            out(paint(f"  {', '.join(rules)} did not run -- {detail}", "dim"))
+
+
+def _by_detail(items: list[Skipped]) -> list[tuple[str, list[str]]]:
+    """Group skipped rules by the reason they share, keeping first-seen order."""
+    grouped: dict[str, list[str]] = {}
+    for item in items:
+        grouped.setdefault(item.detail, []).append(item.rule_id)
+    return list(grouped.items())
 
 
 def _trim(message: str, limit: int = 160) -> str:

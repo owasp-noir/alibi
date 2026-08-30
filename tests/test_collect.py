@@ -109,3 +109,30 @@ def test_a_missing_path_is_left_for_noir_to_report(tmp_path):
     missing = collect.Source(str(tmp_path / "gone"))
     with collect.scannable(missing) as ready:
         assert ready is missing
+
+
+def test_a_skip_that_cost_nothing_is_not_a_missing_view(tmp_path):
+    """Noir declines files on purpose, and says which kind of skip it made.
+
+    A symlink it did not follow, or an image, cost the scan nothing -- its
+    target was already walked. Raising the same alarm for those as for a
+    specification too large to read teaches the reader to skip the section
+    that matters.
+    """
+    lost = collect.ScanError(tech="detect",
+                             message="skipped 1 file: openapi.json; "
+                                     "first error: file too large (12.35MB > 10.0MB)")
+    declined = collect.ScanError(tech="detect",
+                                 message="skipped 2 entries: CLAUDE.md; "
+                                         "first error: symbolic link (not followed)")
+    media = collect.ScanError(tech="detect",
+                              message="skipped 1 file: logo.png; "
+                                      "first error: media file (.png)")
+    gone = collect.ScanError(tech="detect",
+                             message="skipped 1 file: x.py; "
+                                     "first error: permissions, or removed during the scan")
+
+    assert lost.consequential is True
+    assert gone.consequential is True
+    assert declined.consequential is False
+    assert media.consequential is False

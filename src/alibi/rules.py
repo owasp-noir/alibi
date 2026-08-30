@@ -18,6 +18,9 @@ _RULES_FILE = Path(__file__).with_name("rules.yml")
 class Adjustment:
     shift: int
     why: str
+    # Names a column the reader can already see, when this reason only restates
+    # it. The text report leaves those out; machine formats keep everything.
+    restates: str | None = None
 
 
 @dataclass
@@ -267,7 +270,8 @@ class RuleSet:
             if self._condition(entry, adjustment["when"], index, rule):
                 shift = int(adjustment["shift"])
                 severity = self._shift(severity, shift)
-                applied.append(Adjustment(shift, adjustment.get("why", "")))
+                applied.append(Adjustment(shift, adjustment.get("why", ""),
+                                          adjustment.get("restates")))
 
         return Finding(
             rule_id=rule["id"],
