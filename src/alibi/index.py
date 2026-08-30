@@ -116,6 +116,10 @@ class Index:
     # are what "this gateway rule matches nothing" is asked about; the coverage
     # is what "is this code route reachable" is asked of.
     coverages: dict[str, Coverage] = field(default_factory=dict)
+    # Memo for `coverage_stats`. The index does not change after `build`, and
+    # the answer is expensive: every code endpoint against every routing rule.
+    _coverage_stats: dict[str, dict[str, tuple[int, int, int]]] = field(
+        default_factory=dict, repr=False)
 
     def by_view(self, view: str) -> list[Entry]:
         return [e for e in self.entries.values() if view in e.views]
@@ -144,6 +148,7 @@ class Index:
 
     def keys_in(self, view: str) -> list[Key]:
         return [e.key for e in self.entries.values() if view in e.views]
+
 
     def population(self, view: str) -> int:
         return sum(1 for e in self.entries.values() if view in e.views)
@@ -177,20 +182,34 @@ class Index:
         39% of its code, NetBox's real config covers 100%, and picking a line
         between them would be a guess dressed as a rule. So the numbers are
         reported and the reader decides.
+
+        Memoized because a severity adjustment asks for it once per finding,
+        and the answer costs every code endpoint against every routing rule.
+        On authentik that was 1,596 recomputations, 56 million path matches,
+        and 26 of the 27 seconds a scan took.
         """
+        cached = self._coverage_stats.get(target)
+        if cached is not None:
+            return cached
+
+        stats = self._compute_coverage_stats(target)
+        self._coverage_stats[target] = stats
+        return stats
+
+    def _compute_coverage_stats(self, target: str) -> dict[str, tuple[int, int, int]]:
         targets = [key for key in self.keys_in(target) if key.http]
         if not targets:
             # "0 of 0" answers nothing. With no web surface to reach, how much
             # of it a gateway reaches is not a number worth printing.
             return {}
 
-        stats: dict[str, tuple[int, int, int]] = {}
+        computed: dict[str, tuple[int, int, int]] = {}
         for view, coverage in self.coverages.items():
             if not len(coverage):
                 continue
             reached = sum(1 for key in targets if coverage.covers(key))
-            stats[view] = (len(coverage), reached, len(targets))
-        return stats
+            computed[view] = (len(coverage), reached, len(targets))
+        return computed
 
     @property
     def corroborated(self) -> int:

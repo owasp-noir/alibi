@@ -269,3 +269,31 @@ def test_a_mount_carries_no_counterpart(endpoint, view_map):
     label = next(nm for nm in mount.near_misses if "mount" in nm.reason)
 
     assert label.other is None
+
+
+def test_coverage_is_measured_once_however_often_it_is_asked_for(
+    endpoint, view_map, monkeypatch
+):
+    """A severity adjustment asks per finding, and the answer is expensive.
+
+    Every code endpoint against every routing rule: on authentik that ran 1,596
+    times for 56 million path matches, and a scan that should take a second
+    took 27. The index does not change after `build`, so the answer cannot
+    either.
+    """
+    endpoints = [endpoint("/api", "ANY", "nginx")]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(30)]
+
+    index = build(endpoints, view_map)
+
+    calls = []
+    original = index._compute_coverage_stats
+    monkeypatch.setattr(index, "_compute_coverage_stats",
+                        lambda target: calls.append(target) or original(target))
+
+    first = index.coverage_stats()
+    for _ in range(50):
+        index.coverage_stats()
+
+    assert calls == ["code"]
+    assert index.coverage_stats() == first
