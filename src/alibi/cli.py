@@ -88,8 +88,9 @@ def _scan(args) -> int:
     for path in args.paths:
         source = collect.Source(path=path)
         names.append(source.name)
-        result = collect.scan_views(source, noir_bin, techs_by_view,
-                                    extra_args=args.noir_arg)
+        with collect.scannable(source) as ready:
+            result = collect.scan_views(ready, noir_bin, techs_by_view,
+                                        extra_args=args.noir_arg)
         endpoints.extend(result.endpoints)
         errors.extend(result.errors)
 

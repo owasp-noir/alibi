@@ -22,9 +22,12 @@ whole. It costs a handful of noir invocations, each narrower than a full scan.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -85,6 +88,35 @@ class RawEndpoint:
     internal: bool = False
     protocol: str = "http"
     raw: dict = field(default_factory=dict)
+
+
+@contextmanager
+def scannable(source: Source):
+    """Hand noir a directory, whichever kind of path was named.
+
+    Noir scans directories, and a single file is a reasonable thing to point
+    alibi at -- one HAR or one OpenAPI document holds an entire view. Scanning
+    the file's real parent instead would quietly pull in everything beside it,
+    which for a `captures/` directory is every other capture and for a repo
+    root is the repo.
+
+    So a file source is staged alone in a temporary directory. A hard link
+    keeps a large capture from being copied; crossing a filesystem falls back
+    to a copy. A path that does not exist is passed through untouched, because
+    noir's own error message is better than any this could invent.
+    """
+    path = Path(source.path)
+    if path.is_dir() or not path.exists():
+        yield source
+        return
+
+    with tempfile.TemporaryDirectory(prefix="alibi-") as staging:
+        staged = Path(staging) / path.name
+        try:
+            os.link(path, staged)
+        except OSError:
+            shutil.copy2(path, staged)
+        yield Source(path=staging, name=source.name)
 
 
 def find_noir(explicit: str | None = None) -> str:

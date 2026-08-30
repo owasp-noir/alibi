@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import os
 import stat
 
@@ -72,3 +73,39 @@ def test_a_binary_that_prints_nothing_is_an_error_not_an_empty_scan(tmp_path):
 
     with pytest.raises(collect.NoirFailed):
         collect.scan(collect.Source(str(tmp_path)), str(script))
+
+
+def test_a_single_file_is_a_source(tmp_path):
+    """One HAR or one OpenAPI document holds a whole view.
+
+    Noir scans directories, so a file has to be staged into one. It cannot be
+    scanned in place by pointing noir at its parent: a `captures/` directory
+    holds every other capture, and a file at a repo root would drag in the
+    repository.
+    """
+    other = tmp_path / "unrelated.har"
+    other.write_text("{}")
+    target = tmp_path / "prod.har"
+    target.write_text("{}")
+
+    with collect.scannable(collect.Source(str(target))) as ready:
+        staged = Path(ready.path)
+        assert staged.is_dir()
+        assert [p.name for p in staged.iterdir()] == ["prod.har"]
+        assert ready.name == "prod.har"
+
+    # The staging directory does not outlive the scan.
+    assert not staged.exists()
+
+
+def test_a_directory_is_passed_through_untouched(tmp_path):
+    source = collect.Source(str(tmp_path))
+    with collect.scannable(source) as ready:
+        assert ready is source
+
+
+def test_a_missing_path_is_left_for_noir_to_report(tmp_path):
+    """Noir's own message names the problem better than a guess would."""
+    missing = collect.Source(str(tmp_path / "gone"))
+    with collect.scannable(missing) as ready:
+        assert ready is missing
