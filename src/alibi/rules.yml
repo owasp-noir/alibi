@@ -127,12 +127,18 @@ rules:
 # endpoint does not exist -- so that adjustment names only the rules about code
 # that really runs.
 #
-# `needs_signal` guards adjustments that fire on an *absence*. Noir's auth
-# taggers only recognise the frameworks they know, so "carries no auth tag"
-# means "unauthenticated" in a stack noir tags, and means nothing at all in one
-# it does not. Requiring the signal to appear somewhere in the scan is what
-# separates the two; without it every endpoint in an untagged codebase is
-# promoted, and the severity column stops carrying information.
+# Every adjustment here reasons from something noir *found*, never from
+# something it failed to find. An earlier version promoted endpoints carrying
+# no authentication tag, guarded by a check that such tags existed somewhere in
+# the scan. That guard was too weak to hold: Casdoor tags 9 endpoints out of
+# 381, which satisfies "somewhere" and says nothing whatever about the other
+# 372 -- noir's auth taggers recognise the frameworks they know, and their
+# silence is a statement about the tagger, not about the endpoint. Promoting on
+# it graded 61 of 139 findings critical.
+#
+# Rewarding the presence instead needs no guard and makes no inference: an
+# endpoint noir could see an authentication check on is genuinely less alarming
+# than one it could not.
 adjustments:
   - id: pii
     rules: [SHADOW, ORPHAN, LIVE_UNDOC]
@@ -146,12 +152,11 @@ adjustments:
     shift: +1
     why: upload paths carry more consequence than reads
 
-  - id: no-auth
+  - id: authenticated
     rules: [SHADOW, ORPHAN, LIVE_UNDOC]
-    when: { no_tag_matching: "auth|jwt|oauth|session|login|token" }
-    needs_signal: { tag_matching: "auth|jwt|oauth|session|login|token" }
-    shift: +1
-    why: no sign of an authentication check, in a codebase where noir found them elsewhere
+    when: { tag_matching: "auth|jwt|oauth|session|login|token" }
+    shift: -1
+    why: noir found an authentication check on this endpoint
 
   - id: writes
     rules: [SHADOW, ORPHAN, LIVE_UNDOC]

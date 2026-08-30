@@ -1,3 +1,4 @@
+import pytest
 from alibi.collect import RawEndpoint
 from alibi.index import build
 from alibi.rules import RuleSet
@@ -86,31 +87,38 @@ def test_personal_data_raises_severity(endpoint, view_map):
     assert any("personal data" in a.why for a in shadow.adjustments)
 
 
-def test_missing_auth_only_counts_where_noir_tags_auth_at_all(endpoint, view_map):
-    """An absence is only evidence when the signal exists somewhere.
+def test_an_authentication_check_lowers_severity_and_its_absence_does_not_raise_it(
+    endpoint, view_map
+):
+    """Reason from what noir found, never from what it failed to find.
 
-    Noir's auth taggers cover the frameworks they know. In a stack they do not
-    cover, no endpoint carries an auth tag, and promoting all of them would
-    drain the severity column of meaning.
+    An earlier version promoted endpoints carrying no auth tag, guarded by a
+    check that such tags existed somewhere in the scan. Casdoor tags 9
+    endpoints out of 381 — enough to satisfy "somewhere", and no statement at
+    all about the other 372, since noir's auth taggers recognise the frameworks
+    they know and their silence describes the tagger. On that scan the guard
+    let 61 of 139 findings through as critical.
+
+    Rewarding the presence needs no guard and infers nothing.
     """
-    untagged, _ = evaluate(
+    findings, _ = evaluate(
         [
-            endpoint("/thing", "GET", "python_flask"),
+            endpoint("/guarded", "POST", "python_flask", tags=["flask_auth"]),
+            endpoint("/open", "POST", "python_flask"),
             endpoint("/anchor", "GET", "oas3"),
         ],
         view_map,
     )
-    assert next(f for f in untagged if f.key.path == "/thing").severity == "medium"
 
-    tagged, _ = evaluate(
-        [
-            endpoint("/thing", "GET", "python_flask"),
-            endpoint("/guarded", "GET", "python_flask", tags=["flask_auth"]),
-            endpoint("/anchor", "GET", "oas3"),
-        ],
-        view_map,
-    )
-    assert next(f for f in tagged if f.key.path == "/thing").severity == "high"
+    guarded = next(f for f in findings if f.key.path == "/guarded")
+    open_one = next(f for f in findings if f.key.path == "/open")
+
+    # The unguarded one sits at the plain write severity -- not promoted.
+    assert open_one.severity == "high"
+    assert open_one.adjustments and all(
+        "authentication" not in a.why for a in open_one.adjustments)
+    # The guarded one is demoted for what noir could actually see.
+    assert guarded.severity == "medium"
 
 
 def test_auth_adjustment_never_applies_to_phantom(endpoint, view_map):
@@ -399,3 +407,32 @@ def test_a_routing_config_that_does_front_the_code_keeps_its_severity(
     findings, _ = evaluate(endpoints, view_map)
     drift = next(f for f in findings if f.rule_id == "DRIFT")
     assert drift.severity == "medium"
+
+
+def test_an_unknown_condition_is_refused_rather_than_matching_everything(
+    endpoint, view_map
+):
+    """The failure mode that hid a bug in plain sight.
+
+    A condition made only of keys nothing checks passes every time, so a typo
+    in rules.yml does not switch an adjustment off -- it applies it to every
+    finding. `tag_matching` was written into rules.yml before it was
+    implemented and quietly demoted the whole report by one step.
+    """
+    from alibi.index import build
+
+    ruleset = RuleSet.load()
+    ruleset.adjustments = [
+        {"id": "typo", "when": {"tag_machting": "auth"}, "shift": -1, "why": ""}
+    ]
+    index = build(
+        [
+            endpoint("/thing", "GET", "python_flask"),
+            endpoint("/anchor", "GET", "oas3"),
+        ],
+        view_map,
+    )
+    views = {v for e in index.entries.values() for v in e.views}
+
+    with pytest.raises(ValueError, match="unknown condition tag_machting"):
+        ruleset.evaluate(index, views)

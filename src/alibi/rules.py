@@ -280,9 +280,27 @@ class RuleSet:
             adjustments=applied,
         )
 
+    # Every key a condition may use. An unrecognised one is a mistake, and it
+    # is the dangerous kind: a condition made only of keys nothing checks passes
+    # every time, so a typo in rules.yml does not disable an adjustment -- it
+    # applies it to everything. That is exactly how `tag_matching`, written
+    # before it was implemented, silently demoted every finding by a step.
+    CONDITIONS = frozenset({
+        "tag", "tag_matching", "method_in", "internal", "near_miss", "non_http",
+        "catch_all", "observed_in", "not_observed_in", "not_covered_by",
+        "covers_nothing_in", "thin_routing_view",
+    })
+
     def _condition(self, entry: Entry, when: dict, index: Index,
                    rule: dict | None = None) -> bool:
-        if when.get("thin_routing_view") and not self._thin(index, rule):
+        unknown = set(when) - self.CONDITIONS
+        if unknown:
+            raise ValueError(
+                f"unknown condition {', '.join(sorted(unknown))} in rules.yml -- "
+                f"known conditions are {', '.join(sorted(self.CONDITIONS))}"
+            )
+
+        if "thin_routing_view" in when and not self._thin(index, rule):
             return False
 
         if "not_covered_by" in when:
@@ -312,9 +330,10 @@ class RuleSet:
 
         if "tag" in when and when["tag"] not in entry.tags:
             return False
-        if "no_tag_matching" in when:
-            pattern = re.compile(when["no_tag_matching"], re.IGNORECASE)
-            if any(pattern.search(tag) for tag in entry.tags):
+
+        if "tag_matching" in when:
+            pattern = re.compile(when["tag_matching"], re.IGNORECASE)
+            if not any(pattern.search(tag) for tag in entry.tags):
                 return False
         if "method_in" in when and entry.key.method not in when["method_in"]:
             return False

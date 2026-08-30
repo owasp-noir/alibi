@@ -143,7 +143,15 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
     suppresses the `-f json` document along with the logs, which would leave
     this function parsing an empty string and reporting a clean, empty scan.
     """
-    cmd = [noir_bin, "-b", source.path, "-f", "json"]
+    # `-T` runs noir's taggers. They are off by default there, and alibi's
+    # whole severity ladder is built on what they find: whether an endpoint
+    # touches personal data, accepts an upload, or shows any sign of an
+    # authentication check. Without it every finding is graded on its HTTP verb
+    # alone -- on Casdoor that collapsed 139 findings into 64 "high" and 62
+    # "medium" separated by nothing but POST-versus-GET, which the method column
+    # already says. With it, the same scan surfaces pii, file_upload, oauth and
+    # payment tags on 108 endpoints.
+    cmd = [noir_bin, "-b", source.path, "-f", "json", "-T"]
     if only_techs:
         cmd += ["--only-techs", ",".join(only_techs)]
     cmd += extra_args or []
