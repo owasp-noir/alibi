@@ -55,22 +55,37 @@ $ alibi scan ./my-service
 $ alibi scan ./service ./contracts ./captures/prod.har
 ```
 
-Every path is one noir scan. Point it at whatever you have — the views that are
-missing simply switch their rules off rather than flooding the report.
+Every path is a source, and each one is scanned once per view. Point it at
+whatever you have — a source directory, a spec directory, a single capture
+file — and the views you are missing switch their rules off rather than
+flooding the report.
 
 ```
-alibi  ·  1 source  ·  22 endpoints
+alibi  ·  1 source  ·  9 endpoints
 
-  code 12   doc 5   gateway 5
+  code 4   doc 3   traffic 3   gateway 2   infra 1
+
+  2 corroborated -- vouched for by more than one view
+  gateway: 2 rules reaching 3 of 4 code endpoints (75%)
+  infra: 1 rule reaching 0 of 4 code endpoints (0%)
+
+  1 endpoint nearly matched another view -- these may be matching failures, not real gaps
+
+ORPHAN  Orphan route -- Taking real requests, absent from the code
+  1 finding
+
+  high     GET     /api/v0/old-billing   prod.har
 
 SHADOW  Shadow API -- Implemented, but no contract describes it
-  12 findings
+  2 findings
 
-  high     PUT     /create_record   app.py:52
-           changes state rather than reading it
-  high     DELETE  /delete_record   app.py:66
-           changes state rather than reading it
-  medium   GET     /cookie          app.py:31
+  medium   GET     /api/reports      main.py:16
+  medium   GET     /internal/debug   main.py:21
+
+DANGLING  Dangling route -- A routing rule that reaches nothing implemented
+  1 finding
+
+  medium   ANY     /removed-service   nginx.conf:9
 ```
 
 ```console
@@ -132,8 +147,8 @@ Findings say how the match was made:
 
 ## What keeps it honest
 
-A tool like this dies by reporting hundreds of findings on its first run. Five
-things push back:
+A tool like this dies by reporting hundreds of findings on its first run, or by
+reporting progress nobody made. Six things push back:
 
 **Rules do not fire without both views.** Scan a codebase with no contracts
 anywhere and every endpoint technically qualifies as an undocumented shadow API.
@@ -163,6 +178,14 @@ could not read, and alibi prints that above the findings. NetBox ships a 12.35MB
 OpenAPI document with 308 paths; noir skips it for exceeding its file-size cap,
 and without that report alibi states the project documents nothing — not merely
 incomplete, but the wrong answer stated confidently.
+
+**A rule that stopped running has not resolved anything.** Recording scans and
+comparing them reintroduces the same mistake at a distance: forget the
+contracts directory on one run and `SHADOW` evaluates nothing, which to a naive
+difference looks exactly like every shadow API having been closed. On the
+five-view fixture, dropping one argument turned seven standing findings into
+"resolved". Snapshots record which rules evaluated, differences only consider
+rules that ran in both scans, and the rest are named under `NOT COMPARED`.
 
 **An absence is only evidence when the signal exists.** Noir's auth taggers
 cover the frameworks they know. In a stack they do not cover, nothing carries an
