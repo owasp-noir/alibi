@@ -268,34 +268,43 @@ Measured against five repositories:
 
 | Repository | code | doc | corroborated | findings | code↔doc |
 | --- | ---: | ---: | ---: | ---: | --- |
-| casdoor | 372 | 235 | **230 (97.9%)** | 139 | compared |
-| netbox | 855 | 1193 | 0 | 1 | held back |
+| casdoor | 372 | 235 | **230 (98%)** | 139 | compared |
+| netbox | 1146 | 1193 | **796 (67%)** | 746 | compared |
 | argo-cd | 59 | 198 | 1 | 31 | held back |
 | authentik | 231 | 1193 | 1 | 192 | held back |
 | flipt | 2 | 42 | 0 | 0 | held back |
 
-Casdoor is the case where both views arrive at route level, and there **230 of
-its 235 documented endpoints matched the code — 97.9%, with no path
-normalization failures at all.** All 19 near misses were the same path under a
-different verb, which is noir registering every method on a Go catch-all
-handler rather than a matching problem. That number is what says whether this
-approach works.
+Casdoor is the cleanest case: **230 of its 235 documented endpoints matched the
+code, with no path normalization failures at all.** All 19 near misses were the
+same path under a different verb — noir registering every method on a Go
+catch-all handler, not a matching problem.
 
-The other four are held back, each for a reason worth knowing:
+NetBox is the instructive one. It holds two surfaces in one repository: a
+server-rendered web UI and a DRF-router REST API that only the second is
+documented. Scanned whole it reports 746 findings, most of them the true but
+useless observation that a web UI is not in an API specification. Scoped to the
+surface the contract describes, it collapses to what was actually worth saying:
 
-- **Argo CD** registers `/api` in Go and documents 198 paths beneath it, so its
-  code and specification describe the same surface at different granularity.
-- **NetBox** and **authentik** build their REST APIs with DRF routers and a
-  runtime-assembled URLconf. What noir reads statically is the server-rendered
-  web UI, which is a genuinely different surface from the one the spec
-  describes — so zero corroboration is the correct answer, not a matching
-  failure.
+```console
+$ alibi scan ./netbox --ignore '^/(?!api/)'
+```
+→ 3 shadow APIs: `/api/plugins`, `/api/schema/redoc`, `/api/schema/swagger-ui`,
+all three genuinely served and genuinely absent from the schema. The 397
+phantoms that remain are the bulk operations NetBox's own router subclass adds
+to every list endpoint, which no urlconf walk can see.
+
+The other three are held back, each for a reason worth knowing:
+
+- **Argo CD** registers `/api` in Go and documents 198 paths beneath it — the
+  same surface at two granularities.
+- **authentik** assembles its URLconf at runtime by importing every installed
+  app's `urls` module, which no static reader can follow.
 - **flipt** mounts a gRPC gateway; its Go source holds one route.
 
-Which is the honest summary of this tool's ceiling: it can only compare what
-noir can read, and a view noir reads at the wrong granularity is worse than one
-it cannot read at all — that is why so much of the machinery above exists to
-tell those apart.
+Which is this tool's ceiling, stated plainly: it compares what noir can read,
+and a view read at the wrong granularity is worse than one not read at all.
+Most of the machinery above exists to tell those apart rather than to report
+them as defects.
 
 ## License
 
