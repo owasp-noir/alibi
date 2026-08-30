@@ -44,6 +44,9 @@ class Entry:
     key: Key
     observations: list[Observation] = field(default_factory=list)
     near_misses: list["NearMiss"] = field(default_factory=list)
+    # Other verbs answering on this same path, and which views know them.
+    # Context, never doubt -- see `_find_siblings`.
+    siblings: list[tuple[str, frozenset[str]]] = field(default_factory=list)
 
     @property
     def views(self) -> set[str]:
@@ -192,8 +195,16 @@ def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
     return index
 
 
-# How many endpoints have to sit beneath a path before it is read as a mount
-# rather than an endpoint of its own.
+# How many *distinct paths* have to sit beneath a path before it is read as a
+# mount rather than an endpoint of its own.
+#
+# Distinct paths, not endpoints: a REST collection has an item beneath it, and
+# that item answers on four or five verbs. Counting endpoints made
+# `/api/circuits/circuit-groups` look like a mount because
+# `/api/circuits/circuit-groups/{}` exists in GET, PUT, PATCH and DELETE --
+# which is what a collection endpoint is supposed to look like. On NetBox that
+# mislabelled 377 endpoints and demoted the findings on them. A real mount has
+# many different paths beneath it: Argo CD's `/api` has 106.
 MOUNT_THRESHOLD = 3
 
 
@@ -207,21 +218,12 @@ def _find_near_misses(index: Index) -> None:
         segments = entry.key.path.count("/")
         by_shape[(entry.key.method, segments)].append(entry)
 
+    _find_siblings(index, by_path)
+
     for entry in index.entries.values():
         if len(entry.views) != 1:
             continue
         mine = entry.views
-
-        # Same path, different verb. Usually genuine -- a GET-only endpoint is
-        # a real thing -- but worth surfacing, because a spec that documents
-        # only GET while the code also serves POST is a common shape and the
-        # POST finding reads better next to its sibling.
-        for other in by_path[entry.key.path]:
-            if other is entry or other.views <= mine:
-                continue
-            entry.near_misses.append(
-                NearMiss(other.key, other.views, "same path, different method")
-            )
 
         # Same verb and the same number of segments, differing in exactly one
         # position where one side has a parameter and the other has a literal.
@@ -259,7 +261,7 @@ def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
         return None
 
     beneath: set[str] = set()
-    count = 0
+    paths: set[str] = set()
     for other in index.entries.values():
         if other is entry or other.key.path == entry.key.path:
             continue
@@ -268,17 +270,41 @@ def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
         if other.views <= entry.views:
             continue
         beneath |= other.views
-        count += 1
+        paths.add(other.key.path)
 
-    if count < MOUNT_THRESHOLD:
+    if len(paths) < MOUNT_THRESHOLD:
         return None
 
     return NearMiss(
         entry.key,
         beneath,
-        f"looks like a mount: {count} endpoints in {', '.join(sorted(beneath))} "
-        f"live beneath this path",
+        f"looks like a mount: {len(paths)} paths in {', '.join(sorted(beneath))} "
+        f"live beneath this one",
     )
+
+
+def _find_siblings(index: Index, by_path: dict[str, list[Entry]]) -> None:
+    """Record the other verbs answering on the same path.
+
+    This used to be filed as a near miss, which was wrong twice over.
+    Normalization never touches the method, so a verb difference cannot be a
+    matching failure -- and treating it as doubt demoted 380 of NetBox's 746
+    findings for the crime of having a sibling.
+
+    What it is, is context. NetBox's specification carries bulk PUT, PATCH and
+    DELETE on collections its code does not implement; knowing that the GET on
+    the same path *is* corroborated turns 397 phantom endpoints into "the bulk
+    verbs on collections that exist", which is a different and much smaller
+    thing to go and check.
+    """
+    for entry in index.entries.values():
+        for other in by_path[entry.key.path]:
+            if other is entry or other.key.method == entry.key.method:
+                continue
+            if other.views <= entry.views:
+                continue
+            entry.siblings.append((other.key.method, frozenset(other.views)))
+        entry.siblings.sort()
 
 
 def _one_segment_apart(left: str, right: str) -> str | None:

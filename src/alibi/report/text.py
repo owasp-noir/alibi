@@ -207,6 +207,11 @@ def _render_finding(finding: Finding, paint: Painter, out) -> None:
     if distinctive:
         out(paint(f"           {' · '.join(distinctive)}", "dim"))
 
+    if finding.entry.siblings:
+        verbs = ", ".join(sorted({m for m, _ in finding.entry.siblings}))
+        views = sorted({v for _, vs in finding.entry.siblings for v in vs})
+        out(paint(f"           same path answers {verbs} in {', '.join(views)}", "dim"))
+
     if finding.uncertain:
         near = finding.entry.near_misses[0]
         out(paint(f"           near miss: {near.other} "

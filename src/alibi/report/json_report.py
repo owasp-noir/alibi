@@ -99,6 +99,10 @@ def _finding(finding: Finding) -> dict:
             {"shift": a.shift, "why": a.why} for a in finding.adjustments
         ],
         "uncertain": finding.uncertain,
+        "siblings": [
+            {"method": method, "views": sorted(views)}
+            for method, views in entry.siblings
+        ],
     }
 
 

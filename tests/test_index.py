@@ -57,7 +57,15 @@ def test_a_missing_parameter_is_reported_as_a_near_miss(endpoint, view_map):
     assert "parameter" in captured.near_misses[0].reason
 
 
-def test_same_path_different_verb_is_flagged_but_not_conflated(endpoint, view_map):
+def test_same_path_different_verb_is_context_not_doubt(endpoint, view_map):
+    """A verb difference cannot be a matching failure.
+
+    Normalization never touches the method, so `DELETE /x` failing to meet
+    `GET /x` says nothing about whether the paths were lined up correctly.
+    Filed as doubt it demoted 380 of NetBox's 746 findings for the crime of
+    having a sibling; recorded as context it turns 397 phantom endpoints into
+    "the bulk verbs on collections that exist".
+    """
     index = build(
         [
             endpoint("/orders", "POST", "python_flask"),
@@ -67,9 +75,10 @@ def test_same_path_different_verb_is_flagged_but_not_conflated(endpoint, view_ma
     )
 
     assert len(index.entries) == 2
-    for entry in index.entries.values():
-        assert entry.near_misses
-        assert entry.near_misses[0].reason == "same path, different method"
+    assert index.near_miss_count == 0
+
+    post = index.entries[next(k for k in index.entries if k.method == "POST")]
+    assert post.siblings == [("GET", frozenset({"doc"}))]
 
 
 def test_matching_endpoints_produce_no_near_miss_noise(endpoint, view_map):
@@ -106,7 +115,7 @@ def test_a_mount_point_is_recognised_as_one(endpoint, view_map):
 
     assert mount.near_misses
     assert "mount" in mount.near_misses[-1].reason
-    assert "6 endpoints" in mount.near_misses[-1].reason
+    assert "6 paths" in mount.near_misses[-1].reason
 
 
 def test_a_real_endpoint_with_children_is_not_called_a_mount(endpoint, view_map):
@@ -147,3 +156,37 @@ def test_coverage_is_not_reported_when_there_is_no_web_surface(endpoint, view_ma
         view_map,
     )
     assert index.coverage_stats() == {}
+
+
+def test_a_rest_collection_is_not_a_mount(endpoint, view_map):
+    """`/things` has `/things/{id}` beneath it. That is what a collection is.
+
+    Counting endpoints rather than paths made every NetBox collection look like
+    a mount, because its item endpoint answers on four verbs. 377 endpoints
+    were mislabelled and the findings on them demoted for it.
+    """
+    endpoints = [endpoint("/api/things", "DELETE", "oas3")]
+    endpoints += [
+        endpoint("/api/things/{id}", method, "python_flask")
+        for method in ("GET", "PUT", "PATCH", "DELETE")
+    ]
+
+    index = build(endpoints, view_map)
+    collection = index.entries[
+        next(k for k in index.entries if k.path == "/api/things" and k.method == "DELETE")
+    ]
+    assert not any("mount" in nm.reason for nm in collection.near_misses)
+
+
+def test_many_different_paths_beneath_one_still_reads_as_a_mount(endpoint, view_map):
+    """Argo CD's `/api` has 106 distinct paths under it. That is a mount."""
+    endpoints = [endpoint("/api", "POST", "go_http")]
+    endpoints += [
+        endpoint(f"/api/v1/resource{i}", "GET", "oas2") for i in range(6)
+    ]
+
+    index = build(endpoints, view_map)
+    mount = index.entries[next(k for k in index.entries if k.path == "/api")]
+
+    assert any("mount" in nm.reason for nm in mount.near_misses)
+    assert "6 paths" in next(nm.reason for nm in mount.near_misses if "mount" in nm.reason)
