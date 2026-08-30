@@ -10,4 +10,9 @@ build/
 .alibi/
 *.sqlite3
 .DS_Store
+# No lock file. CI installs unlocked on purpose, so that an upstream release
+# breaking this package surfaces there rather than in a bug report -- and a
+# committed lock would have CI testing a dependency set no user of the
+# published package has. `just setup` still writes one locally.
 uv.lock
+.build-check/
