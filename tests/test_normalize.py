@@ -190,3 +190,22 @@ def test_an_expanded_pattern_meets_the_route_that_serves_it():
     documented = normalize("/api/v1/{name=attachments/*}", "GET")
     implemented = normalize("/api/v1/attachments/{id}", "GET")
     assert documented.key == implemented.key
+
+
+def test_an_express_5_optional_group_leaves_the_path_it_certainly_serves():
+    """`/user/:id{/:op}` is how Express 5 writes what used to be `:op?`.
+
+    The braces hold a path, so the segment rules never saw a valid segment and
+    the result came out as `/user/{}{/{}}`. It is the one malformed key in all
+    3,195 route strings noir's fixtures produce across 33 languages.
+
+    The group is dropped rather than expanded: the route certainly answers on
+    `/user/:id`, and whether it also answers a segment deeper depends on the
+    request. A documented longer form becomes a near miss, which is the right
+    amount of doubt to leave behind.
+    """
+    assert normalize("/user/:id{/:op}").key.path == "/user/{}"
+    assert normalize("/user/:id{/detail}").key.path == "/user/{}"
+
+    # And the other brace form that holds a path is untouched by this.
+    assert normalize("/api/v1/{name=memos/*}").key.path == "/api/v1/memos/{}"

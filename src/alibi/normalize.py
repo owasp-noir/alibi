@@ -46,6 +46,17 @@ _ANGLE = re.compile(r"<(?:(?P<conv>[A-Za-z_][\w.]*)\s*:)?(?P<name>[^<>/]*)>")
 # {id}, {id:int}, {id?}, {*rest}, {**rest}  -- OpenAPI, Spring, ASP.NET, Laravel
 _BRACE = re.compile(r"\{(?P<body>[^{}/]*)\}")
 
+# {/:op}, {/detail} -- Express 5 wraps an optional group in braces, replacing
+# the `:op?` of earlier versions. The body holds a path, so like the gRPC
+# pattern above it has to be handled before the split on `/`.
+#
+# The group is dropped rather than expanded. `/user/:id{/:op}` certainly
+# answers on `/user/:id`; whether it also answers one segment deeper depends
+# on the request, and the base path is the part that is not in question. A
+# documented longer form becomes a near miss against this, which is the right
+# amount of doubt to leave behind.
+_OPTIONAL_GROUP = re.compile(r"\{(?P<body>/[^{}]*)\}")
+
 # {name=attachments/*}  -- a gRPC-gateway resource pattern. The body is a path
 # of its own, and it is the path this endpoint actually answers on:
 # `{name=attachments/*}` serves `/attachments/123`. So the pattern is expanded
@@ -304,6 +315,7 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
         )
 
     path = _RESOURCE_PATTERN.sub(take_resource, path)
+    path = _OPTIONAL_GROUP.sub("", path)
 
     original_path = path
     names: list[str] = list(resource_names)
