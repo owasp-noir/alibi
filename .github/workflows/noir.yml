@@ -1,0 +1,76 @@
+# The one workflow that installs noir.
+#
+# ci.yml deliberately does not: the end-to-end tests skip themselves when noir
+# is absent, so a pull request never waits on a noir release. The cost of that
+# is a green badge which proves nothing about the only thing alibi does --
+# read noir's JSON, its `list techs` catalog, and its tagger output. Every one
+# of those is a contract with a program released on its own schedule, and it
+# can break without a line of this repository changing.
+#
+# So the integration runs here instead, on a schedule, where a failure means
+# "noir moved" rather than "this pull request is bad".
+name: noir integration
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Monday morning UTC
+  workflow_dispatch:
+    inputs:
+      noir_version:
+        description: "noir version to test against (default: latest release)"
+        required: false
+  push:
+    paths:
+      # The files that encode assumptions about noir specifically.
+      - "src/alibi/collect.py"
+      - "src/alibi/views.yml"
+      - "tests/test_end_to_end.py"
+      - ".github/workflows/noir.yml"
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install noir
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ inputs.noir_version }}
+        run: |
+          tag="${PINNED:-$(gh release view --repo owasp-noir/noir --json tagName -q .tagName)}"
+          echo "noir $tag"
+          gh release download "$tag" --repo owasp-noir/noir \
+            --pattern '*linux*x86_64*' --dir /tmp/noir --clobber
+          cd /tmp/noir
+          for f in *; do
+            case "$f" in
+              *.tar.gz) tar xzf "$f" ;;
+              *.zip)    unzip -o "$f" ;;
+            esac
+          done
+          install -m 0755 "$(find /tmp/noir -type f -name noir | head -1)" /usr/local/bin/noir
+          noir --version
+
+      - name: Install alibi
+        run: |
+          uv venv --python 3.13
+          uv pip install -e .
+          uv pip install --group dev
+
+      # -p no:randomly is not needed; what matters is that the noir-dependent
+      # tests are the point of this job, so a skip is a failure here.
+      - name: The end-to-end tests must run, not skip
+        run: |
+          .venv/bin/python -m pytest tests/ -q -rs
+          if .venv/bin/python -m pytest tests/test_end_to_end.py -q -rs 2>&1 | grep -q "noir is not installed"; then
+            echo "::error::end-to-end tests skipped -- noir was not found"
+            exit 1
+          fi
+
+      # The view map defaults anything unlisted to `code`, which is wrong for a
+      # specification analyzer noir added after views.yml was last touched.
+      # `doctor` exits non-zero on exactly that drift.
+      - name: The view map still matches this noir build
+        run: .venv/bin/alibi doctor

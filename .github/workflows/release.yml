@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Trusted Publishing rather than a stored API token: PyPI mints a short-lived
+# credential from this workflow's OIDC identity, so there is no secret in the
+# repository to leak or rotate. It needs a one-time publisher configured on
+# PyPI for project `noir-alibi`, owner `owasp-noir`, repository `alibi`,
+# workflow `release.yml`, environment `pypi`.
+permissions:
+  contents: read
+
+jobs:
+  # The tag says what to publish; nothing checks that it matches the version in
+  # pyproject.toml. Tagging v0.2.0 with 0.1.0 still in the file uploads a second
+  # 0.1.0, and PyPI does not allow replacing a file once it is there. So the
+  # comparison happens before anything is built.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag and the packaged version have to agree
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          packaged=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag: $tagged, pyproject: $packaged"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "::error::tag v$tagged does not match pyproject.toml version $packaged"
+            exit 1
+          fi
+
+  # The same suite CI runs on every pull request. A tag can be pushed to a
+  # commit that never had one, so it is not safe to assume this already passed.
+  test:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e .
+          uv pip install --group dev
+      - run: .venv/bin/python -m pytest tests/ -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      # views.yml and rules.yml are data the tool cannot run without, and they
+      # reach the wheel only because hatchling includes non-Python files in the
+      # package directory by default. That is a default, not a declaration, so
+      # a wheel missing them would install cleanly and fail on first use.
+      - name: The wheel carries the data files
+        run: |
+          python -m zipfile -l dist/*.whl | tee /dev/stderr | grep -q 'alibi/views.yml'
+          python -m zipfile -l dist/*.whl | grep -q 'alibi/rules.yml'
+      - name: The built package installs and runs
+        run: |
+          python -m venv /tmp/check
+          /tmp/check/bin/pip install --quiet dist/*.whl
+          /tmp/check/bin/alibi --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # what PyPI exchanges for a publishing token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github_release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Draft the release from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)."
