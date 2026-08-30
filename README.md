@@ -52,71 +52,53 @@ $ alibi scan ./my-service
 ## Use
 
 ```console
-$ alibi scan ./service ./contracts ./captures/prod.har
+$ alibi scan                                      # the working directory
+$ alibi scan ./service ./contracts ./prod.har     # or wherever the views live
 ```
 
-Every path is a source, and each one is scanned once per view. Point it at
-whatever you have — a source directory, a spec directory, a single capture
-file — and the views you are missing switch their rules off rather than
-flooding the report.
+Every path is a source, scanned once per view. Point it at whatever you have —
+a source tree, a spec directory, a single capture file — and the views you are
+missing switch their rules off rather than flooding the report.
 
 ```
-alibi  ·  1 source  ·  9 endpoints
+alibi  ·  1 source  ·  377 endpoints
 
-  code 4   doc 3   traffic 3   gateway 2   infra 1
+  code 372   doc 235
 
-  2 corroborated -- vouched for by more than one view
-  gateway: 2 rules reaching 3 of 4 code endpoints (75%)
-  infra: 1 rule reaching 0 of 4 code endpoints (0%)
+  230 corroborated -- vouched for by more than one view
 
-  1 endpoint nearly matched another view -- these may be matching failures, not real gaps
-
-ORPHAN  Orphan route -- Taking real requests, absent from the code
-  1 finding
-
-  high     GET     /api/v0/old-billing   prod.har
+  19 endpoints nearly matched another view -- these may be matching failures, not real gaps
 
 SHADOW  Shadow API -- Implemented, but no contract describes it
-  2 findings
+  134 findings  ·  4 critical, 57 high, 62 medium, 11 low
 
-  medium   GET     /api/reports      main.py:16
-  medium   GET     /internal/debug   main.py:21
+  critical POST    /api/upload-groups        router.go:87
+           upload paths carry more consequence than reads
+  critical POST    /api/upload-permissions   router.go:208
+  ...
+  ... and 122 more (SHADOW in full: -f json)
 
-DANGLING  Dangling route -- A routing rule that reaches nothing implemented
-  1 finding
-
-  medium   ANY     /removed-service   nginx.conf:9
+TWO SURFACES?
+  The doc view is 97% under /api, and 37 of these findings are outside it.
+  If that is a separate surface the contract never covered, narrow the scan:
+    alibi scan <paths> --ignore '^/(?!api/)'
+  If it is the same surface left undocumented, they are the findings that matter most.
 ```
 
-```console
-$ alibi scan ./service ./contracts -f json --fail-on high    # for CI
-$ alibi scan ./service ./contracts -f sarif                  # for GitHub code scanning
-$ alibi doctor                                               # view map vs. your noir build
+Groups stop at twelve — the ordering is worst-first, so the tail is the least
+informative part, and `-f json` has all of it.
+
+### In CI
+
+```yaml
+- run: alibi scan . ./contracts -f sarif > alibi.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with: { sarif_file: alibi.sarif }
 ```
 
-Findings on their own say where the views disagree today. `--snapshot` records
-each scan so the next one can say what moved:
-
-```console
-$ alibi scan ./service ./contracts --snapshot    # into .alibi/snapshots.db
-$ alibi history                                  # new and resolved since the last scan
-```
-
-```
-alibi history  ·  .alibi/snapshots.db  ·  4 scans
-
-  2026-08-30T09:12:04Z  compared against  2026-08-29T18:03:11Z
-
-NEW  the previous scan did not have these
-  1 finding
-
-  high     SHADOW   DELETE  /admin/purge
-           endpoint first seen in code 2026-08-12T11:40:02Z
-```
-
-That last line is the part worth reading. A shadow API on a route that arrived
-with it is a documentation step somebody skipped; one on a route that has been
-in the code since August means a contract stopped covering it.
+Or gate directly: `alibi scan . ./contracts --fail-on high` exits non-zero when
+a finding reaches that severity. A scan noir could not read in full reports
+`executionSuccessful: false`, so a degraded run does not pass as a clean one.
 
 ## How endpoints are matched
 

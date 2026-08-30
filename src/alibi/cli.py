@@ -27,8 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     scan = sub.add_parser("scan", help="scan sources and report where the views disagree")
-    scan.add_argument("paths", nargs="+", metavar="PATH",
-                      help="anything noir can read: a codebase, a spec directory, a capture file")
+    # Defaulting to the working directory: `alibi scan` in a repository root
+    # is what people type, and refusing it with a usage block to ask for the
+    # dot is the kind of friction that gets a tool closed.
+    scan.add_argument("paths", nargs="*", default=["."], metavar="PATH",
+                      help="anything noir can read: a codebase, a spec "
+                           "directory, a capture file (default: .)")
     scan.add_argument("-f", "--format", choices=["text", "json", "sarif"], default="text")
     scan.add_argument("--noir-bin", help="path to the noir binary (default: found on PATH)")
     scan.add_argument("--views", help="alternative views.yml")

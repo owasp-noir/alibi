@@ -94,3 +94,29 @@ def test_a_skip_that_cost_nothing_does_not_raise_the_alarm(endpoint, view_map):
 
     loud = render(endpoints, view_map, errors=lost)
     assert "NOIR COULD NOT READ EVERYTHING" in loud
+
+
+def test_an_empty_scan_says_so_rather_than_describing_the_machinery(view_map):
+    """The likeliest first run of all: the wrong directory.
+
+    "No rule had the views it needs" is true and describes the rule engine, not
+    the situation, and leaves the reader hunting for a flag they are missing.
+    """
+    output = render([], view_map)
+
+    assert "Noir found no endpoints here." in output
+    assert "corroborated" not in output
+    assert "did not run" not in output
+
+
+def test_scan_accepts_no_paths_at_all(capsys):
+    """`alibi scan` in a repository root is what people type.
+
+    Refusing it with a usage block to ask for the dot is the kind of friction
+    that gets a tool closed. Reaching the noir lookup proves argument parsing
+    accepted the call.
+    """
+    from alibi.cli import EXIT_ERROR, main
+
+    assert main(["scan", "--noir-bin", "/nonexistent/noir"]) == EXIT_ERROR
+    assert "no noir binary" in capsys.readouterr().err

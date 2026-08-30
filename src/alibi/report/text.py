@@ -64,6 +64,20 @@ def render(
     out(paint("alibi", "bold") + paint(
         f"  ·  {len(sources)} source{'s' if len(sources) != 1 else ''}"
         f"  ·  {len(index.entries)} endpoints", "dim"))
+    if not index.entries:
+        # By far the likeliest first run: the wrong directory. Saying "no rule
+        # had the views it needs" here describes the machinery rather than the
+        # situation, and leaves the reader looking for a flag they are missing.
+        out()
+        out("  " + paint("Noir found no endpoints here.", "medium"))
+        out(paint("  It reads code in 33 languages, OpenAPI and other API "
+                  "contracts, captured\n  traffic, gateway config and "
+                  "infrastructure declarations. Point alibi at\n  a directory "
+                  "holding some of those, or run `noir -b <path>` to see what "
+                  "it finds.", "dim"))
+        out()
+        return
+
     out()
     out("  " + "   ".join(
         f"{view} {paint(str(count), 'bold')}"
