@@ -79,6 +79,30 @@ $ alibi scan ./service ./contracts -f sarif                  # for GitHub code s
 $ alibi doctor                                               # view map vs. your noir build
 ```
 
+Findings on their own say where the views disagree today. `--snapshot` records
+each scan so the next one can say what moved:
+
+```console
+$ alibi scan ./service ./contracts --snapshot    # into .alibi/snapshots.db
+$ alibi history                                  # new and resolved since the last scan
+```
+
+```
+alibi history  ·  .alibi/snapshots.db  ·  4 scans
+
+  2026-08-30T09:12:04Z  compared against  2026-08-29T18:03:11Z
+
+NEW  the previous scan did not have these
+  1 finding
+
+  high     SHADOW   DELETE  /admin/purge
+           endpoint first seen in code 2026-08-12T11:40:02Z
+```
+
+That last line is the part worth reading. A shadow API on a route that arrived
+with it is a documentation step somebody skipped; one on a route that has been
+in the code since August means a contract stopped covering it.
+
 ## How endpoints are matched
 
 Noir keeps each framework's own route syntax rather than inventing a common one,
