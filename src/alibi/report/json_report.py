@@ -10,7 +10,8 @@ from ..rules import Finding, Skipped
 
 
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
-          sources: list[str], errors: list = (), suppressed: list = ()) -> dict:
+          sources: list[str], errors: list = (), suppressed: list = (),
+          ruleset=None) -> dict:
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
         for view in entry.views:
@@ -35,7 +36,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                 for view, (rules, reached, total) in index.coverage_stats().items()
             },
         },
-        "scope_hint": _hint(suggest(index, findings)),
+        "scope_hint": _hint(suggest(index, findings, ruleset)),
         "findings": [_finding(f) for f in findings],
         "skipped_rules": [
             {"rule": s.rule_id, "reason": s.reason, "detail": s.detail}
@@ -102,6 +103,8 @@ def _finding(finding: Finding) -> dict:
 
 
 def dump(index: Index, findings: list[Finding], skipped: list[Skipped],
-         sources: list[str], errors: list = (), suppressed: list = ()) -> str:
+         sources: list[str], errors: list = (), suppressed: list = (),
+         ruleset=None) -> str:
     return json.dumps(
-        build(index, findings, skipped, sources, errors, suppressed), indent=2)
+        build(index, findings, skipped, sources, errors, suppressed, ruleset),
+        indent=2)

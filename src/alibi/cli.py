@@ -108,7 +108,8 @@ def _scan(args) -> int:
     findings, suppressed = ignores.apply(findings)
 
     if args.format == "json":
-        print(json_report.dump(index, findings, skipped, names, errors, suppressed))
+        print(json_report.dump(index, findings, skipped, names, errors,
+                               suppressed, rules))
     elif args.format == "sarif":
         print(sarif.dump(index, findings, skipped, names, rules, errors,
                          suppressed))

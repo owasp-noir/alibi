@@ -164,7 +164,7 @@ def render(
             out(paint(f"  ... and {len(group) - GROUP_LIMIT} more "
                       f"({rule_id} in full: -f json)", "dim"))
 
-    _render_scope_hint(suggest(index, findings), paint, out)
+    _render_scope_hint(suggest(index, findings, rules), paint, out)
     _render_near_misses(index, paint, out)
     _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)

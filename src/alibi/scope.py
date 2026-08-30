@@ -68,8 +68,21 @@ def _dominant_prefix(paths: list[str]) -> tuple[str, float] | None:
     return prefix, count / len(paths)
 
 
-def suggest(index: Index, findings: list, view: str = "doc") -> Hint | None:
-    """Is one view scoped to a prefix that many findings fall outside of?"""
+def suggest(index: Index, findings: list, ruleset=None,
+            view: str = "doc") -> Hint | None:
+    """Is one view scoped to a prefix that many findings fall outside of?
+
+    Only findings from rules that reason about `view` count. Authentik's
+    specification is 100% under `/api` while 192 of its findings sit outside
+    it -- but those are all UNEXPOSED and DRIFT, about gateways and
+    infrastructure, and narrowing the scan because the *contract* stops at
+    `/api` would be answering a question nobody asked.
+    """
+    if ruleset is not None:
+        about_view = {rule["id"] for rule in ruleset.rules
+                      if view in rule.get("needs", [])}
+        findings = [f for f in findings if f.rule_id in about_view]
+
     paths = [key.path for key in index.keys_in(view) if key.http]
     dominant = _dominant_prefix(paths)
     if dominant is None:
