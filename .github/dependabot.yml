@@ -1,0 +1,11 @@
+# The actions in these workflows were three major versions behind before
+# anyone noticed -- found only because the runner started warning that Node 20
+# was being forced onto Node 24. That is a slow way to learn it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

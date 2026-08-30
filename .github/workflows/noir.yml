@@ -31,8 +31,14 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          # There is no uv.lock: CI installs unlocked so that an upstream
+          # release breaking this package shows up here rather than in a bug
+          # report. pyproject.toml is what decides the install, so it is what
+          # the cache should be keyed on.
+          cache-dependency-glob: "pyproject.toml"
 
       # The linux asset is a bare executable named for its release
       # (noir-v1.3.0-linux-x86_64), not an archive and not called `noir`.

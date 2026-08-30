@@ -20,7 +20,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: The tag and the packaged version have to agree
         run: |
           tagged="${GITHUB_REF_NAME#v}"
@@ -40,8 +40,14 @@ jobs:
       matrix:
         python: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          # There is no uv.lock: CI installs unlocked so that an upstream
+          # release breaking this package shows up here rather than in a bug
+          # report. pyproject.toml is what decides the install, so it is what
+          # the cache should be keyed on.
+          cache-dependency-glob: "pyproject.toml"
       - name: Install
         run: |
           uv venv --python ${{ matrix.python }}
@@ -53,8 +59,14 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          # There is no uv.lock: CI installs unlocked so that an upstream
+          # release breaking this package shows up here rather than in a bug
+          # report. pyproject.toml is what decides the install, so it is what
+          # the cache should be keyed on.
+          cache-dependency-glob: "pyproject.toml"
       - run: uv build
       # views.yml and rules.yml are data the tool cannot run without, and they
       # reach the wheel only because hatchling includes non-Python files in the
@@ -69,7 +81,7 @@ jobs:
           python -m venv /tmp/check
           /tmp/check/bin/pip install --quiet dist/*.whl
           /tmp/check/bin/alibi --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -81,7 +93,7 @@ jobs:
     permissions:
       id-token: write   # what PyPI exchanges for a publishing token
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -93,8 +105,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
