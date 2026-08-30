@@ -1,7 +1,6 @@
 import json
-from pathlib import Path
-import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -136,3 +135,39 @@ def test_a_skip_that_cost_nothing_is_not_a_missing_view(tmp_path):
     assert gone.consequential is True
     assert declined.consequential is False
     assert media.consequential is False
+
+
+def versioned_noir(tmp_path, output, name="versioned-noir"):
+    """A stand-in that answers `--version` with a prepared line."""
+    script = tmp_path / name
+    script.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+def test_a_noir_below_the_floor_is_refused_before_the_scan(tmp_path):
+    """`noir list techs` arrived in 1.0.0, and the catalog is the first thing
+    alibi asks for. Without this check the failure surfaces as "could not read
+    `noir list techs -f json`", which names the symptom and not the cause."""
+    old = versioned_noir(tmp_path, "0.30.0")
+    with pytest.raises(collect.NoirTooOld) as exc:
+        collect.require_version(old)
+    assert "0.30.0" in str(exc.value)
+    assert "1.0.0" in str(exc.value)
+
+
+def test_a_noir_at_or_above_the_floor_passes(tmp_path):
+    assert collect.require_version(versioned_noir(tmp_path, "1.0.0")) == (1, 0, 0)
+    assert collect.require_version(versioned_noir(tmp_path, "1.3.0")) == (1, 3, 0)
+
+
+def test_a_binary_that_will_not_report_a_version_is_not_refused(tmp_path):
+    """An unreadable version is not evidence of an old one. A wrapper script or
+    a build from source can both be current, and refusing on an absence would
+    block installations that work."""
+    quiet = versioned_noir(tmp_path, "")
+    assert collect.require_version(quiet) is None
+
+
+def test_a_version_check_that_cannot_run_is_not_refused(tmp_path):
+    assert collect.noir_version(str(tmp_path / "does-not-exist")) is None

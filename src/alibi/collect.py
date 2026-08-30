@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -38,6 +39,21 @@ class NoirNotFound(RuntimeError):
 
 class NoirFailed(RuntimeError):
     pass
+
+
+class NoirTooOld(RuntimeError):
+    pass
+
+
+# `noir list techs` is a v1.0.0 subcommand -- before it, the catalog was read
+# with `--list-techs`, and v1 only keeps that spelling as a silent alias going
+# the other way. Since the catalog is what assigns every technology to a view,
+# an older noir does not fail in some degraded corner; it fails at the first
+# thing alibi asks. So the floor is stated once, here, and checked before a
+# scan rather than discovered as "could not read `noir list techs -f json`".
+MINIMUM_NOIR = (1, 0, 0)
+
+_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
 @dataclass
@@ -93,7 +109,7 @@ class ScanError:
 
 @dataclass
 class ScanResult:
-    endpoints: list["RawEndpoint"]
+    endpoints: list[RawEndpoint]
     errors: list[ScanError]
 
 
@@ -154,6 +170,44 @@ def find_noir(explicit: str | None = None) -> str:
         raise NoirNotFound(
             "noir is not on PATH. Install it (https://github.com/owasp-noir/noir) "
             "or point at a binary with --noir-bin."
+        )
+    return found
+
+
+def noir_version(noir_bin: str, timeout: int = 30) -> tuple[int, int, int] | None:
+    """Read the binary's version, or None when it will not say.
+
+    `--version` rather than the v1 `version` subcommand: the whole point is to
+    recognise a noir too old to have subcommands, and v1 accepts both.
+    """
+    try:
+        proc = subprocess.run(
+            [noir_bin, "--version"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = _VERSION.search(proc.stdout or proc.stderr or "")
+    if not found:
+        return None
+    return tuple(int(part) for part in found.groups())
+
+
+def require_version(noir_bin: str) -> tuple[int, int, int] | None:
+    """Refuse a noir known to be too old; say nothing about one that will not say.
+
+    A binary that reports no version is not evidence of an old one -- a wrapper
+    script or a build from source can both be current -- and refusing to run on
+    an absence would block installations that work. Only a version that reads
+    below the floor is grounds to stop.
+    """
+    found = noir_version(noir_bin)
+    if found is not None and found < MINIMUM_NOIR:
+        raise NoirTooOld(
+            f"noir {'.'.join(str(part) for part in found)} is too old; alibi "
+            f"needs {'.'.join(str(part) for part in MINIMUM_NOIR)} or newer "
+            f"for `noir list techs`. Upgrade it "
+            f"(https://github.com/owasp-noir/noir)."
         )
     return found
 

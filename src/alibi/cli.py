@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import collect, snapshot
+from . import __version__, collect, snapshot
 from .ignore import IgnoreList
 from .index import build as build_index
 from .report import history as history_report
@@ -41,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Cross-check the views of your attack surface and find the "
                     "endpoints that cannot corroborate each other.",
     )
+    parser.add_argument("--version", action="version",
+                        version=f"alibi {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     scan = sub.add_parser("scan", help="scan sources and report where the views disagree")
@@ -95,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             return _doctor(args)
         if args.command == "history":
             return _history(args)
-    except (collect.NoirNotFound, collect.NoirFailed,
+    except (collect.NoirNotFound, collect.NoirFailed, collect.NoirTooOld,
             snapshot.SnapshotError) as exc:
         print(f"alibi: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -106,6 +108,7 @@ def _scan(args) -> int:
     view_map = ViewMap.load(args.views)
     rules = RuleSet.load(args.rules)
     noir_bin = collect.find_noir(args.noir_bin)
+    collect.require_version(noir_bin)
 
     # Noir's own catalog decides which technologies exist; views.yml decides
     # what each one speaks for. One `--only-techs` list per view falls out.
@@ -174,8 +177,12 @@ def _doctor(args) -> int:
     """
     view_map = ViewMap.load(args.views)
     noir_bin = collect.find_noir(args.noir_bin)
+    found = collect.require_version(noir_bin)
     catalog = collect.list_techs(noir_bin)
 
+    reported = ".".join(str(part) for part in found) if found else "not reported"
+    print(f"alibi:        {__version__}")
+    print(f"noir:         {reported}")
     spec_techs = {name for name, spec in catalog.items() if "language" not in spec}
     unmapped = sorted(spec_techs - view_map.mapped_techs)
     stale = sorted(view_map.mapped_techs - set(catalog))

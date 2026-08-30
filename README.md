@@ -42,7 +42,11 @@ alibi parses no API formats of its own. Its only input is noir's JSON.
 
 ## Install
 
-Requires [noir](https://github.com/owasp-noir/noir) on `PATH`.
+Requires [noir](https://github.com/owasp-noir/noir) **1.0.0 or newer** on
+`PATH` -- that is the release where `noir list techs` became a subcommand, and
+that catalog is what assigns every technology to a view. Development tracks the
+current noir release. An older binary is refused by name rather than left to
+fail on its first catalog read.
 
 ```console
 $ uv tool install noir-alibi     # or: pipx install noir-alibi
