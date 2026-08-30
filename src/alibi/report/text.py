@@ -283,24 +283,29 @@ def _shorten(path: str) -> str:
 
 
 def _render_conflated(index: Index, paint: Painter, out) -> None:
-    """Warn when one scan looks like it is holding several services.
+    """Report contracts in different directories claiming one path.
 
-    This one hides findings rather than inventing them, which is the direction
-    worth interrupting for: the reader would otherwise see "no disagreement"
-    and believe it.
+    Its alarming reading -- several services in one scan -- hides findings
+    rather than inventing them, and the reader would otherwise see "no
+    disagreement" and believe it. Its benign reading, an aggregate document
+    beside its per-package sources, is at least as common. Both are printed
+    and neither is ranked, because nothing measurable here separates them.
     """
     conflated = index.conflated()
     if not conflated:
         return
 
     out()
-    out(paint("SEVERAL SERVICES IN ONE SCAN?", "high"))
+    out(paint("TWO CONTRACTS FOR ONE PATH", "bold"))
     out(paint(f"  {len(conflated)} endpoint"
               f"{'s are' if len(conflated) != 1 else ' is'} claimed by contracts "
-              f"in different directories. If those are\n  separate services, one "
-              f"service's implementation is corroborating another's contract,\n"
-              f"  and findings on both are disappearing. Scan them separately "
-              f"to be sure.", "dim"))
+              f"in different directories.", "dim"))
+    out(paint("  If those are separate services, one service's implementation "
+              "is corroborating\n  another's contract and findings on both are "
+              "disappearing -- scan them apart.\n"
+              "  If it is one API described by an aggregate document beside its "
+              "per-package\n  sources, which is the ordinary shape of a "
+              "gRPC-gateway project, this is nothing.", "dim"))
     for key, directories in conflated[:5]:
         out(paint(f"    {key}", "dim"))
         for directory in directories:

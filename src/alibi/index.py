@@ -180,17 +180,26 @@ class Index:
         stops being reported. Scanned apart, it is a PHANTOM.
 
         That is the dangerous direction -- a finding disappearing rather than a
-        false one appearing -- so it is worth saying even though the tool
-        cannot fix it. Two contracts in *different directories* claiming one
-        path is the tell: measured across Casdoor, NetBox, Directus and
-        authentik it fires on none of them, and Casdoor ships the same
-        specification as both `.json` and `.yml` in one directory, which is why
-        the directory rather than the file is what counts.
+        false one appearing -- so it is worth surfacing even though the tool
+        cannot fix it.
 
-        It does not catch every shape. One service implementing a path that
-        only another documents leaves a single contract behind it, and no
-        signal here. Catching that would mean inferring where one service ends
-        and the next begins, which is a guess this tool does not make.
+        What this measures is narrow and the report says so: two contracts in
+        *different directories* claiming one path. The directory rather than
+        the file, because Casdoor ships one specification as both `.json` and
+        `.yml` and counting files flagged 235 of its endpoints.
+
+        It has a benign reading that is at least as common as the alarming one.
+        Argo CD and flipt both describe a single API with an aggregate document
+        beside its per-package sources, which is the ordinary shape of a
+        gRPC-gateway project, and both land here. Two attempts to separate that
+        from real conflation by structure failed -- neither directory nesting
+        nor path-set containment holds across both -- so the report gives both
+        readings and ranks neither. Guessing which one applies is what this
+        tool does not do.
+
+        It also misses shapes: one service implementing a path that only
+        another documents leaves a single contract behind it, and no signal
+        here.
         """
         found: list[tuple[Key, list[str]]] = []
         for entry in self.entries.values():

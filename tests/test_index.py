@@ -342,3 +342,30 @@ def test_one_specification_in_two_formats_is_not_two_services(endpoint, view_map
 
     index = build(endpoints, view_map)
     assert index.conflated() == []
+
+
+def test_an_aggregate_document_beside_its_sources_still_reports(
+    endpoint, view_map
+):
+    """Argo CD and flipt both land here, and neither is a monorepo.
+
+    A generated aggregate document describing the whole API, beside the
+    per-package specifications it was built from, produces exactly the same
+    measurement as two services sharing a path. Two attempts to separate them
+    by structure failed -- neither directory nesting nor path-set containment
+    holds across both -- so this is reported with both readings rather than
+    filtered on a guess. The test pins that it is *not* silently dropped.
+    """
+    endpoints = [
+        endpoint("/api/v1/account", "GET", "python_flask"),
+        endpoint("/api/v1/account", "GET", "oas3",
+                 code_paths=({"path": "assets/swagger.json"},)),
+        endpoint("/api/v1/account", "GET", "oas3",
+                 code_paths=({"path": "server/account/account.swagger.json"},)),
+    ]
+
+    index = build(endpoints, view_map)
+    conflated = index.conflated()
+
+    assert len(conflated) == 1
+    assert conflated[0][1] == ["assets", "server/account"]
