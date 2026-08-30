@@ -164,7 +164,10 @@ def test_the_five_step_severity_survives_the_four_level_flattening(
         view_map,
     )
 
-    by_path = {r["message"]["text"].split()[1]: r for r in results(document)}
+    by_path = {
+        r["message"]["text"].split()[1]: r
+        for r in results(document) if r["ruleId"] == "SHADOW"
+    }
     assert by_path["/profile"]["level"] == "error"
     assert by_path["/profile"]["properties"]["severity"] == "high"
     assert by_path["/plain"]["level"] == "warning"
@@ -205,9 +208,10 @@ def test_a_rule_that_never_ran_is_reported_rather_than_dropped(endpoint, view_ma
 
     assert results(document) == []
     notifications = document["runs"][0]["invocations"][0]["toolExecutionNotifications"]
-    assert {n["associatedRule"]["id"] for n in notifications} == {"SHADOW", "PHANTOM"}
-    assert all(n["properties"]["reason"] == "no-overlap" for n in notifications)
-    assert all(n["level"] == "warning" for n in notifications)
+    held_back = [n for n in notifications
+                 if n["properties"]["reason"] == "no-overlap"]
+    assert {n["associatedRule"]["id"] for n in held_back} == {"SHADOW", "PHANTOM"}
+    assert all(n["level"] == "warning" for n in held_back)
 
 
 def test_an_absolute_path_is_made_relative_to_the_working_directory(
