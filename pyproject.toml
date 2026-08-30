@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "hahwul", email = "hahwul@gmail.com" },
+    { name = "ksg97031", email = "ksg97031@gmail.com" },
 ]
 keywords = ["security", "api", "shadow-api", "attack-surface", "noir"]
 classifiers = [
