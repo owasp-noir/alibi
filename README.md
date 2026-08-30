@@ -266,26 +266,36 @@ Early, but all five views are compared.
 
 Measured against five repositories:
 
-| Repository | code | doc | corroborated | findings | near misses | |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| casdoor | 372 | 235 | 230 | 147 | 19 | compared |
-| flipt | 2 | 42 | 0 | 0 | 0 | held back |
-| authentik | 231 | 1193 | 0 | 0 | 12 | held back |
-| argo-cd | 59 | 198 | 0 | 0 | 14 | held back |
-| netbox | 855 | 0 | — | 0 | 2 | no contract found |
+| Repository | code | doc | corroborated | findings | code↔doc |
+| --- | ---: | ---: | ---: | ---: | --- |
+| casdoor | 372 | 235 | **230 (97.9%)** | 139 | compared |
+| netbox | 855 | 1193 | 0 | 1 | held back |
+| argo-cd | 59 | 198 | 1 | 31 | held back |
+| authentik | 231 | 1193 | 1 | 192 | held back |
+| flipt | 2 | 42 | 0 | 0 | held back |
 
 Casdoor is the case where both views arrive at route level, and there **230 of
 its 235 documented endpoints matched the code — 97.9%, with no path
 normalization failures at all.** All 19 near misses were the same path under a
 different verb, which is noir registering every method on a Go catch-all
-handler, not a matching problem. That is the number that says whether this
+handler rather than a matching problem. That number is what says whether this
 approach works.
 
-The other four are held back, and each for a real reason: NetBox ships no
-specification noir recognises; Argo CD registers `/api` in Go while documenting
-198 paths beneath it; noir reads no Django routes in authentik and picks up an
-unrelated Rust component instead. Reporting 1424 findings on authentik would
-have been easy and worthless.
+The other four are held back, each for a reason worth knowing:
+
+- **Argo CD** registers `/api` in Go and documents 198 paths beneath it, so its
+  code and specification describe the same surface at different granularity.
+- **NetBox** and **authentik** build their REST APIs with DRF routers and a
+  runtime-assembled URLconf. What noir reads statically is the server-rendered
+  web UI, which is a genuinely different surface from the one the spec
+  describes — so zero corroboration is the correct answer, not a matching
+  failure.
+- **flipt** mounts a gRPC gateway; its Go source holds one route.
+
+Which is the honest summary of this tool's ceiling: it can only compare what
+noir can read, and a view noir reads at the wrong granularity is worse than one
+it cannot read at all — that is why so much of the machinery above exists to
+tell those apart.
 
 ## License
 
