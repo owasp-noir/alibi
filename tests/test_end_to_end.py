@@ -30,13 +30,15 @@ def test_a_real_scan_matches_across_the_notation_boundary():
     Two of each describe the same endpoint in different syntax and must cancel
     out; the leftovers are one undocumented route and one unbuilt contract.
     """
-    endpoints = collect.scan(collect.Source(str(FIXTURE)), _noir())
-    index = build(endpoints, ViewMap.load())
+    result = collect.scan(collect.Source(str(FIXTURE)), _noir())
+    index = build(result.endpoints, ViewMap.load())
     views = {v for entry in index.entries.values() for v in entry.views}
     findings, skipped = RuleSet.load().evaluate(index, views)
 
     assert views == {"code", "doc"}
-    assert skipped == []
+    # The six rules about traffic, gateways and infrastructure have no source
+    # here and correctly sit out; the two this fixture exercises must run.
+    assert not [s for s in skipped if s.rule_id in {"SHADOW", "PHANTOM"}]
     assert index.near_miss_count == 0
 
     reported = {(f.rule_id, f.key.method, f.key.path) for f in findings}

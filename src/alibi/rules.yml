@@ -38,6 +38,88 @@ rules:
       being updated, or one that was designed and never built. Clients written
       against the document will get a 404.
 
+  - id: ORPHAN
+    name: Orphan route
+    summary: Taking real requests, absent from the code
+    present: [traffic]
+    absent: [code]
+    needs: [traffic, code]
+    needs_observed: [traffic]
+    when: { observed_in: traffic }
+    severity: high
+    detail: >-
+      Something out there is calling this endpoint and nothing in the codebase
+      accounts for it. Either it is served by a component that was not scanned,
+      or it is a route that outlived the code that was supposed to remove it.
+      Either way an unaccounted-for endpoint is answering real requests.
+
+  - id: LIVE_UNDOC
+    name: Undocumented live endpoint
+    summary: Taking real requests, described by no contract
+    present: [traffic]
+    absent: [doc]
+    needs: [traffic, doc]
+    needs_observed: [traffic]
+    when: { observed_in: traffic }
+    severity: high
+    detail: >-
+      Requests are reaching an endpoint that no specification describes. It is
+      in use, so removing it will break somebody, and it is undocumented, so
+      whoever reviewed the documented surface never saw it.
+
+  - id: DANGLING
+    name: Dangling route
+    summary: A routing rule that reaches nothing implemented
+    present: [gateway]
+    needs: [gateway, code]
+    when: { covers_nothing_in: code }
+    severity: medium
+    detail: >-
+      A gateway rule matches paths that no code in the scan serves. Usually a
+      backend that moved or was deleted while its route stayed behind. Traffic
+      matching it reaches whatever the gateway falls through to.
+
+  - id: DRIFT
+    name: Infrastructure drift
+    summary: Declared for deployment, missing from the code
+    present: [infra]
+    needs: [infra, code]
+    when: { covers_nothing_in: code }
+    severity: medium
+    detail: >-
+      A function, route or rewrite is declared in infrastructure but nothing in
+      the codebase implements what it points at. The declaration and the
+      repository disagree about what is being deployed.
+
+  - id: UNEXPOSED
+    name: Unexposed endpoint
+    summary: Implemented, but no gateway rule reaches it
+    present: [code]
+    needs: [code, gateway]
+    when: { not_covered_by: gateway }
+    severity: low
+    detail: >-
+      No routing rule in the scan reaches this endpoint. That is exactly what
+      you want for something internal, and a problem for anything meant to be
+      callable -- so this one is worth reading as a question rather than a
+      defect. Note that coverage is computed generously: noir reports the path
+      a rule matches but not whether it matches as a prefix or exactly, so a
+      route reported here is one that nothing plausibly reaches.
+
+  - id: COLD
+    name: Cold endpoint
+    summary: Implemented, never seen taking a request
+    present: [code]
+    needs: [code, traffic]
+    needs_observed: [traffic]
+    when: { not_observed_in: traffic }
+    severity: info
+    detail: >-
+      No captured request reached this endpoint. This says only that nothing
+      watched it during the capture, which is why it carries the lowest
+      severity -- a quarterly job or an error path is legitimately cold. It is
+      useful in aggregate, as a shortlist of code that may no longer be needed.
+
 # Severity moves up or down by whole steps. Adjustments accumulate.
 #
 # `rules` scopes an adjustment to the findings where it means something. Asking
@@ -53,26 +135,26 @@ rules:
 # promoted, and the severity column stops carrying information.
 adjustments:
   - id: pii
-    rules: [SHADOW]
+    rules: [SHADOW, ORPHAN, LIVE_UNDOC]
     when: { tag: pii }
     shift: +1
     why: an undocumented endpoint that handles personal data
 
   - id: upload
-    rules: [SHADOW]
+    rules: [SHADOW, ORPHAN, LIVE_UNDOC]
     when: { tag: file_upload }
     shift: +1
     why: upload paths carry more consequence than reads
 
   - id: no-auth
-    rules: [SHADOW]
+    rules: [SHADOW, ORPHAN, LIVE_UNDOC]
     when: { no_tag_matching: "auth|jwt|oauth|session|login|token" }
     needs_signal: { tag_matching: "auth|jwt|oauth|session|login|token" }
     shift: +1
     why: no sign of an authentication check, in a codebase where noir found them elsewhere
 
   - id: writes
-    rules: [SHADOW]
+    rules: [SHADOW, ORPHAN, LIVE_UNDOC]
     when: { method_in: [POST, PUT, PATCH, DELETE, QUERY] }
     shift: +1
     why: changes state rather than reading it

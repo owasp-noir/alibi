@@ -17,6 +17,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from .collect import RawEndpoint
+from .cover import Coverage
 from .normalize import Key, Normalized, normalize
 from .views import TechView, ViewMap
 
@@ -61,10 +62,14 @@ class Entry:
         """Only internal when nothing that saw it thought otherwise."""
         return bool(self.observations) and all(o.raw.internal for o in self.observations)
 
-    @property
-    def observed_views(self) -> set[str]:
-        """Views backed by a real capture rather than a hand-kept collection."""
-        return {o.view for o in self.observations if o.tech.observed or o.view != "traffic"}
+    def observed_in(self, view: str) -> bool:
+        """Was this endpoint *witnessed* in that view, not just written down?
+
+        The distinction only bites for traffic: a request in a HAR capture
+        happened, a request in a Postman collection is one somebody intended.
+        Rules that call an endpoint live, or call it unused, depend on this.
+        """
+        return any(o.view == view and o.tech.observed for o in self.observations)
 
     @property
     def grade(self) -> str:
@@ -95,9 +100,17 @@ class NearMiss:
 class Index:
     entries: dict[Key, Entry] = field(default_factory=dict)
     unmapped_techs: set[str] = field(default_factory=set)
+    # Gateways and infrastructure declare routing rules rather than endpoints,
+    # so they are kept as coverage predicates as well as entries. The entries
+    # are what "this gateway rule matches nothing" is asked about; the coverage
+    # is what "is this code route reachable" is asked of.
+    coverages: dict[str, Coverage] = field(default_factory=dict)
 
     def by_view(self, view: str) -> list[Entry]:
         return [e for e in self.entries.values() if view in e.views]
+
+    def keys_in(self, view: str) -> list[Key]:
+        return [e.key for e in self.entries.values() if view in e.views]
 
     def population(self, view: str) -> int:
         return sum(1 for e in self.entries.values() if view in e.views)
@@ -118,6 +131,29 @@ class Index:
     def near_miss_count(self) -> int:
         return sum(1 for e in self.entries.values() if e.near_misses)
 
+    def coverage_stats(self, target: str = "code") -> dict[str, tuple[int, int, int]]:
+        """Per routing view: how many rules, how much of `target` they reach.
+
+        Whether "34 endpoints no gateway reaches" is a real finding or an
+        artefact depends entirely on whether the gateway config in the scan is
+        the one that actually fronts the service. A config checked in as e2e
+        test data reaches some of the code and misses the rest, and looks from
+        here exactly like a production config with holes in it.
+
+        No threshold separates those honestly -- Argo CD's test fixture covers
+        39% of its code, NetBox's real config covers 100%, and picking a line
+        between them would be a guess dressed as a rule. So the numbers are
+        reported and the reader decides.
+        """
+        targets = [key for key in self.keys_in(target) if key.http]
+        stats: dict[str, tuple[int, int, int]] = {}
+        for view, coverage in self.coverages.items():
+            if not len(coverage):
+                continue
+            reached = sum(1 for key in targets if coverage.covers(key))
+            stats[view] = (len(coverage), reached, len(targets))
+        return stats
+
     @property
     def corroborated(self) -> int:
         """Endpoints more than one view vouches for.
@@ -135,7 +171,7 @@ def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
 
     for raw in raw_endpoints:
         tech = view_map.lookup(raw.technology)
-        normalized = normalize(raw.url, raw.method)
+        normalized = normalize(raw.url, raw.method, raw.protocol)
         entry = index.entries.get(normalized.key)
         if entry is None:
             entry = Entry(key=normalized.key)
@@ -143,6 +179,10 @@ def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
         entry.observations.append(
             Observation(normalized=normalized, raw=raw, view=tech.view, tech=tech)
         )
+
+    for view in view_map.views:
+        if view_map.is_predicate(view):
+            index.coverages[view] = Coverage.from_entries(index.entries.values(), view)
 
     _find_near_misses(index)
     return index

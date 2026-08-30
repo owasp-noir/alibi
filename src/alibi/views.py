@@ -24,7 +24,14 @@ class TechView:
 
     @property
     def observed(self) -> bool:
-        return self.kind == OBSERVED
+        """Did something actually watch this, or did someone write it down?
+
+        Only collections carry the distinction: a HAR file and a Burp export
+        record requests that happened, a Postman collection records requests
+        somebody meant to make. Everything else -- code, specifications,
+        gateway config -- is a real artifact, so it counts as observed.
+        """
+        return self.kind != CURATED
 
 
 class ViewMap:

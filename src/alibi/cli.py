@@ -65,23 +65,24 @@ def _scan(args) -> int:
     techs_by_view = view_map.techs_by_view(catalog)
 
     endpoints = []
+    errors = []
     names = []
     for path in args.paths:
         source = collect.Source(path=path)
         names.append(source.name)
-        endpoints.extend(
-            collect.scan_views(source, noir_bin, techs_by_view,
-                               extra_args=args.noir_arg)
-        )
+        result = collect.scan_views(source, noir_bin, techs_by_view,
+                                    extra_args=args.noir_arg)
+        endpoints.extend(result.endpoints)
+        errors.extend(result.errors)
 
     index = build_index(endpoints, view_map)
     present_views = {view for entry in index.entries.values() for view in entry.views}
     findings, skipped = rules.evaluate(index, present_views)
 
     if args.format == "json":
-        print(json_report.dump(index, findings, skipped, names))
+        print(json_report.dump(index, findings, skipped, names, errors))
     else:
-        text.render(index, findings, skipped, rules, names)
+        text.render(index, findings, skipped, rules, names, errors)
 
     if args.fail_on:
         threshold = rules.severities.index(args.fail_on)

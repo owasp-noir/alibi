@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from .cover import Rule as CoverRule
 from .index import Entry, Index
 
 _RULES_FILE = Path(__file__).with_name("rules.yml")
@@ -98,6 +99,19 @@ class RuleSet:
                 ))
                 continue
 
+            unwitnessed = [
+                view for view in rule.get("needs_observed", [])
+                if not any(e.observed_in(view) for e in index.entries.values())
+            ]
+            if unwitnessed:
+                skipped.append(Skipped(
+                    rule["id"], "not-observed",
+                    f"the {', '.join(unwitnessed)} view holds only hand-written "
+                    f"collections in this scan, and what nobody watched cannot "
+                    f"show what is live or unused",
+                ))
+                continue
+
             disconnected = self._disconnected(index, rule)
             if disconnected:
                 skipped.append(disconnected)
@@ -107,11 +121,11 @@ class RuleSet:
 
         for entry in index.entries.values():
             for rule in runnable:
-                if not self._matches(entry, rule):
+                if not self._matches(entry, rule, index):
                     continue
-                if self._suppressed(entry):
+                if self._suppressed(entry, index):
                     continue
-                findings.append(self._build(entry, rule, signals))
+                findings.append(self._build(entry, rule, signals, index))
 
         findings.sort(
             key=lambda f: (-self.severities.index(f.severity), f.key.path, f.key.method)
@@ -141,16 +155,37 @@ class RuleSet:
         right_size = index.population(right)
         if max(left_size, right_size) < MIN_POPULATION_FOR_OVERLAP:
             return None
-        if index.overlap(left, right) > 0:
+
+        # Two endpoint sets connect by sharing members. A routing view connects
+        # by reaching them -- one `location /api/` legitimately shares no key
+        # with anything while covering the whole API, so counting shared keys
+        # there would call every healthy gateway disconnected.
+        connection = self._connection(index, left, right)
+        if connection > 0:
             return None
 
         return Skipped(
             rule["id"], "no-overlap",
-            f"{left_size} {left} and {right_size} {right} endpoints, none of them "
-            f"the same -- the two views never met, so every endpoint would "
-            f"qualify. Check whether one side is a mount point standing in for "
-            f"the routes beneath it, or a stack noir could not read.",
+            f"{left_size} {left} and {right_size} {right} endpoints, and not one "
+            f"of them lines up -- the two views never met, so every endpoint "
+            f"would qualify. Check whether one side is a mount point standing "
+            f"in for the routes beneath it, or a stack noir could not read.",
         )
+
+    def _connection(self, index: Index, left: str, right: str) -> int:
+        """How much two views actually have to do with each other."""
+        left_cover = index.coverages.get(left)
+        right_cover = index.coverages.get(right)
+
+        if left_cover is not None and right_cover is None:
+            return sum(1 for key in index.keys_in(right) if left_cover.covers(key))
+        if right_cover is not None and left_cover is None:
+            return sum(1 for key in index.keys_in(left) if right_cover.covers(key))
+        if left_cover is not None and right_cover is not None:
+            # Two routing views. Neither enumerates endpoints, so the only
+            # honest test is whether their rules describe the same paths.
+            return index.overlap(left, right)
+        return index.overlap(left, right)
 
     def _available_signals(self, index: Index) -> set[str]:
         """Which absence-based adjustments have evidence that they mean anything.
@@ -171,18 +206,28 @@ class RuleSet:
                 live.add(adjustment["id"])
         return live
 
-    def _matches(self, entry: Entry, rule: dict) -> bool:
+    def _matches(self, entry: Entry, rule: dict, index: Index) -> bool:
+        # Every rule here reasons about the web surface. A CLI command, a Kafka
+        # topic and a mobile deep link are all real attack surface that noir
+        # reports, but no OpenAPI document describes them and no nginx rule
+        # routes to them, so they would produce a finding for every endpoint.
+        if entry.key.protocol not in rule.get("protocols", ["http"]):
+            return False
+
         views = entry.views
         if not all(v in views for v in rule.get("present", [])):
             return False
         if any(v in views for v in rule.get("absent", [])):
             return False
+        extra = rule.get("when")
+        if extra and not self._condition(entry, extra, index):
+            return False
         return True
 
-    def _suppressed(self, entry: Entry) -> bool:
-        return any(self._condition(entry, s["when"]) for s in self.suppressions)
+    def _suppressed(self, entry: Entry, index: Index) -> bool:
+        return any(self._condition(entry, s["when"], index) for s in self.suppressions)
 
-    def _build(self, entry: Entry, rule: dict, signals: set[str]) -> Finding:
+    def _build(self, entry: Entry, rule: dict, signals: set[str], index: Index) -> Finding:
         base = rule.get("severity", "medium")
         severity = base
         applied: list[Adjustment] = []
@@ -193,7 +238,7 @@ class RuleSet:
                 continue
             if adjustment.get("needs_signal") and adjustment["id"] not in signals:
                 continue
-            if self._condition(entry, adjustment["when"]):
+            if self._condition(entry, adjustment["when"], index):
                 shift = int(adjustment["shift"])
                 severity = self._shift(severity, shift)
                 applied.append(Adjustment(shift, adjustment.get("why", "")))
@@ -209,7 +254,29 @@ class RuleSet:
             adjustments=applied,
         )
 
-    def _condition(self, entry: Entry, when: dict) -> bool:
+    def _condition(self, entry: Entry, when: dict, index: Index) -> bool:
+        if "not_covered_by" in when:
+            view = when["not_covered_by"]
+            coverage = index.coverages.get(view)
+            if coverage is None or coverage.covers(entry.key):
+                return False
+
+        if "covers_nothing_in" in when:
+            # Asked of a routing rule, not an endpoint: does anything this rule
+            # reaches actually exist? A prefix that matches half the codebase
+            # is not a dangling route, however little it resembles any single
+            # endpoint key.
+            target = when["covers_nothing_in"]
+            reach = CoverRule(key=entry.key, view="", prefix=True)
+            if any(reach.reaches(key) for key in index.keys_in(target)):
+                return False
+
+        if "observed_in" in when and not entry.observed_in(when["observed_in"]):
+            return False
+
+        if "not_observed_in" in when and entry.observed_in(when["not_observed_in"]):
+            return False
+
         if "tag" in when and when["tag"] not in entry.tags:
             return False
         if "no_tag_matching" in when:

@@ -65,10 +65,21 @@ _REGEX_META = re.compile(r"[.\[\]()+\\^$|]")
 # Segments that are purely "match anything from here on".
 _BARE_WILDCARDS = {".*", ".+", ".*$", ".+$", "(.*)", "(.+)"}
 
-# Methods that do not describe an HTTP request/response pair. Noir emits these
-# for STOMP and WebSocket surfaces; they share a URL space with HTTP verbs but
-# comparing them against one is meaningless, so they are keyed separately.
-NON_HTTP_METHODS = frozenset({"SEND", "SUBSCRIBE", "MESSAGE", "PUBLISH"})
+# Noir reports a protocol per endpoint, and it is the right discriminator for
+# what shares a URL space with what. `cli://gitops-engine/agent` is a command
+# line, not a path: read as HTTP it becomes `/agent`, collides with any web
+# route of that name, and gets asked whether a gateway routes to it.
+#
+# http and https describe one space -- a specification with an `https` server
+# block documents the same endpoints the code serves -- so they collapse.
+# Everything else keeps its own space and never matches across.
+HTTP_PROTOCOLS = frozenset({"http", "https", ""})
+HTTP = "http"
+
+# Verbs outside HTTP's request/response model. Redundant with the protocol for
+# well-formed input, kept because an analyzer that reports one without setting
+# the other should still not have its STOMP frames compared to a REST contract.
+NON_HTTP_METHODS = frozenset({"SEND", "SUBSCRIBE", "MESSAGE", "PUBLISH", "RECEIVE", "CLI"})
 
 # A gateway route that answers on any verb.
 WILDCARD_METHOD = "ANY"
@@ -80,9 +91,16 @@ class Key:
 
     method: str
     path: str
+    protocol: str = HTTP
+
+    @property
+    def http(self) -> bool:
+        return self.protocol == HTTP
 
     def __str__(self) -> str:
-        return f"{self.method} {self.path}"
+        if self.http:
+            return f"{self.method} {self.path}"
+        return f"{self.protocol}: {self.method} {self.path}"
 
 
 @dataclass
@@ -220,8 +238,8 @@ def _split_query(url: str) -> tuple[str, str | None]:
     return url, None
 
 
-def normalize(url: str, method: str = "GET") -> Normalized:
-    """Reduce a noir endpoint URL and method to a comparable key."""
+def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized:
+    """Reduce a noir endpoint URL, method and protocol to a comparable key."""
     raw = (url or "").strip()
     host: str | None = None
     notes: list[str] = []
@@ -266,10 +284,12 @@ def normalize(url: str, method: str = "GET") -> Normalized:
         canon_path = canon_path.rstrip("/")
         notes.append("trailing slash dropped")
 
-    norm_method, non_http = split_method(method)
+    norm_method, odd_verb = split_method(method)
+    space = HTTP if (protocol or "").lower() in HTTP_PROTOCOLS else protocol.lower()
+    non_http = space != HTTP or odd_verb
 
     return Normalized(
-        key=Key(method=norm_method, path=canon_path),
+        key=Key(method=norm_method, path=canon_path, protocol=space),
         original_url=raw,
         original_path=original_path,
         host=host,

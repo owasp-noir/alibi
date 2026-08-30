@@ -1,3 +1,4 @@
+from alibi.collect import RawEndpoint
 from alibi.index import build
 from alibi.rules import RuleSet
 
@@ -7,6 +8,18 @@ def evaluate(endpoints, view_map):
     views = {v for entry in index.entries.values() for v in entry.views}
     rules = RuleSet.load()
     return rules.evaluate(index, views)
+
+
+def reasons(skipped, *rule_ids):
+    """Why the named rules sat out.
+
+    Every rule the scan lacks a view for is reported as skipped, so a scan of
+    code and documentation alone legitimately holds back the six rules about
+    traffic, gateways and infrastructure. Tests assert about the rules they are
+    actually exercising rather than the whole set, which would otherwise have
+    to be rewritten every time a rule is added.
+    """
+    return {s.reason for s in skipped if s.rule_id in rule_ids}
 
 
 def test_shadow_and_phantom_are_reported_from_the_same_scan(endpoint, view_map):
@@ -42,8 +55,7 @@ def test_no_contract_in_the_scan_means_no_shadow_findings(endpoint, view_map):
     )
 
     assert findings == []
-    assert {s.rule_id for s in skipped} == {"SHADOW", "PHANTOM"}
-    assert skipped[0].reason == "missing-view"
+    assert reasons(skipped, "SHADOW", "PHANTOM") == {"missing-view"}
 
 
 def test_writes_outrank_reads(endpoint, view_map):
@@ -165,8 +177,8 @@ def test_views_that_never_met_hold_the_rules_back(endpoint, view_map):
     findings, skipped = evaluate(endpoints, view_map)
 
     assert findings == []
-    assert {s.reason for s in skipped} == {"no-overlap"}
-    assert "never met" in skipped[0].detail
+    assert reasons(skipped, "SHADOW", "PHANTOM") == {"no-overlap"}
+    assert "never met" in next(s.detail for s in skipped if s.rule_id == "SHADOW")
 
 
 def test_one_shared_endpoint_is_enough_to_trust_the_comparison(endpoint, view_map):
@@ -179,7 +191,7 @@ def test_one_shared_endpoint_is_enough_to_trust_the_comparison(endpoint, view_ma
 
     findings, skipped = evaluate(endpoints, view_map)
 
-    assert skipped == []
+    assert reasons(skipped, "SHADOW", "PHANTOM") == set()
     assert len(findings) == 16
 
 
@@ -193,7 +205,7 @@ def test_a_tiny_scan_is_not_second_guessed(endpoint, view_map):
         view_map,
     )
     assert {f.rule_id for f in findings} == {"SHADOW", "PHANTOM"}
-    assert skipped == []
+    assert reasons(skipped, "SHADOW", "PHANTOM") == set()
 
 
 def test_a_populated_view_sharing_nothing_is_disconnected_however_small_the_other(
@@ -211,4 +223,115 @@ def test_a_populated_view_sharing_nothing_is_disconnected_however_small_the_othe
     findings, skipped = evaluate(endpoints, view_map)
 
     assert findings == []
-    assert {s.reason for s in skipped} == {"no-overlap"}
+    assert reasons(skipped, "SHADOW", "PHANTOM") == {"no-overlap"}
+
+
+# --- the traffic, gateway and infrastructure rules ---------------------------
+
+def test_a_route_taking_real_requests_with_no_code_is_an_orphan(endpoint, view_map):
+    findings, _ = evaluate(
+        [
+            endpoint("/legacy/export", "GET", "har"),
+            endpoint("/current", "GET", "har"),
+            endpoint("/current", "GET", "python_flask"),
+        ],
+        view_map,
+    )
+    orphans = {f.key.path for f in findings if f.rule_id == "ORPHAN"}
+    assert orphans == {"/legacy/export"}
+
+
+def test_a_postman_collection_cannot_prove_an_endpoint_is_live(endpoint, view_map):
+    """Nobody watched it. Somebody wrote it down.
+
+    Treating a hand-kept request collection as evidence of live traffic would
+    let a stale Postman file manufacture high-severity orphan routes.
+    """
+    findings, skipped = evaluate(
+        [
+            endpoint("/legacy/export", "GET", "postman"),
+            endpoint("/current", "GET", "postman"),
+            endpoint("/current", "GET", "python_flask"),
+        ],
+        view_map,
+    )
+    assert not [f for f in findings if f.rule_id == "ORPHAN"]
+    assert reasons(skipped, "ORPHAN") == {"not-observed"}
+
+
+def test_a_gateway_prefix_does_not_look_like_a_dangling_route(endpoint, view_map):
+    """The whole reason gateways cannot be compared as sets.
+
+    One `location /api/` shares no key with any endpoint while reaching all of
+    them. Read as a set difference it is a route pointing at nothing.
+    """
+    endpoints = [endpoint("/api", "ANY", "nginx")]
+    endpoints += [
+        endpoint(f"/api/v1/thing{i}", "GET", "python_flask") for i in range(4)
+    ]
+
+    findings, _ = evaluate(endpoints, view_map)
+    assert not [f for f in findings if f.rule_id == "DANGLING"]
+
+
+def test_a_gateway_rule_reaching_nothing_is_dangling(endpoint, view_map):
+    endpoints = [endpoint("/removed-service", "ANY", "nginx")]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(4)]
+
+    findings, _ = evaluate(endpoints, view_map)
+    dangling = {f.key.path for f in findings if f.rule_id == "DANGLING"}
+    assert dangling == {"/removed-service"}
+
+
+def test_an_endpoint_behind_a_gateway_prefix_is_not_unexposed(endpoint, view_map):
+    endpoints = [endpoint("/api", "ANY", "nginx")]
+    endpoints += [
+        endpoint(f"/api/v1/thing{i}", "GET", "python_flask") for i in range(4)
+    ]
+    endpoints.append(endpoint("/debug/pprof", "GET", "python_flask"))
+
+    findings, _ = evaluate(endpoints, view_map)
+    unexposed = {f.key.path for f in findings if f.rule_id == "UNEXPOSED"}
+    assert unexposed == {"/debug/pprof"}
+
+
+def test_code_never_seen_taking_a_request_is_cold(endpoint, view_map):
+    endpoints = [endpoint(f"/used{i}", "GET", "python_flask") for i in range(3)]
+    endpoints += [endpoint(f"/used{i}", "GET", "har") for i in range(3)]
+    endpoints.append(endpoint("/quarterly-report", "GET", "python_flask"))
+
+    findings, _ = evaluate(endpoints, view_map)
+    cold = {f.key.path for f in findings if f.rule_id == "COLD"}
+    assert cold == {"/quarterly-report"}
+    assert next(f for f in findings if f.rule_id == "COLD").severity == "info"
+
+
+def test_infrastructure_declaring_what_no_code_serves_is_drift(endpoint, view_map):
+    endpoints = [endpoint("/api/ghost", "ANY", "terraform")]
+    endpoints += [endpoint(f"/api/real{i}", "GET", "python_flask") for i in range(4)]
+
+    findings, _ = evaluate(endpoints, view_map)
+    drift = {f.key.path for f in findings if f.rule_id == "DRIFT"}
+    assert drift == {"/api/ghost"}
+
+
+def test_non_web_surface_never_generates_web_findings(endpoint, view_map):
+    """Argo CD reports 3 CLI entry points; none of them is an undocumented API.
+
+    Every rule here compares against OpenAPI documents and gateway config.
+    Neither describes a command line, so a CLI endpoint would qualify for all
+    of them at once.
+    """
+    endpoints = [
+        RawEndpoint(url="cli://argocd/agent", method="CLI", technology="go_cli",
+                    source="t", protocol="cli"),
+        RawEndpoint(url="/api/real", method="GET", technology="go_http",
+                    source="t", protocol="http"),
+    ]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "oas3") for i in range(6)]
+    endpoints += [endpoint(f"/spec/{i}", "GET", "go_http") for i in range(6)]
+
+    findings, _ = evaluate(endpoints, view_map)
+
+    assert not [f for f in findings if f.key.protocol != "http"]
+    assert {f.key.path for f in findings if f.rule_id == "SHADOW"} == {"/api/real"}

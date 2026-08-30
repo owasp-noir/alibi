@@ -49,6 +49,28 @@ class Source:
             self.name = Path(self.path).name or self.path
 
 
+@dataclass(frozen=True)
+class ScanError:
+    """Something noir could not read.
+
+    Noir reports these in an `errors` key and they change what its silence
+    means. NetBox ships a 12.35MB OpenAPI document with 308 paths; noir skips
+    it for exceeding the file-size cap and says so. Discard that and alibi
+    concludes there is "no doc source in this scan" -- which is not merely
+    incomplete but the wrong conclusion drawn confidently.
+    """
+
+    tech: str
+    message: str
+    source: str = ""
+
+
+@dataclass
+class ScanResult:
+    endpoints: list["RawEndpoint"]
+    errors: list[ScanError]
+
+
 @dataclass
 class RawEndpoint:
     """A noir endpoint plus where alibi got it from."""
@@ -81,7 +103,7 @@ def find_noir(explicit: str | None = None) -> str:
 
 
 def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
-         timeout: int = 900, only_techs: list[str] | None = None) -> list[RawEndpoint]:
+         timeout: int = 900, only_techs: list[str] | None = None) -> ScanResult:
     """Run one noir scan and return its endpoints.
 
     Noir writes its logs to stderr and the JSON document to stdout, so the two
@@ -113,17 +135,29 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
             f"Check that the path exists and that this noir build supports `-f json`."
         ) from exc
 
-    return [_convert(item, source.name) for item in document.get("endpoints", [])]
+    return ScanResult(
+        endpoints=[_convert(item, source.name)
+                   for item in document.get("endpoints", [])],
+        errors=[
+            ScanError(
+                tech=str(item.get("tech", "")),
+                message=str(item.get("message", "")),
+                source=source.name,
+            )
+            for item in (document.get("errors") or [])
+        ],
+    )
 
 
 def scan_views(source: Source, noir_bin: str, techs_by_view: dict[str, list[str]],
-               extra_args: list[str] | None = None, workers: int = 4) -> list[RawEndpoint]:
+               extra_args: list[str] | None = None, workers: int = 4) -> ScanResult:
     """Scan one source once per view, so corroboration survives.
 
     The runs are independent processes waiting on I/O, so they overlap. Noir
     parallelises internally too, which is why the pool is small.
     """
     endpoints: list[RawEndpoint] = []
+    errors: list[ScanError] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(scan, source, noir_bin, extra_args, only_techs=techs): view
@@ -131,8 +165,13 @@ def scan_views(source: Source, noir_bin: str, techs_by_view: dict[str, list[str]
             if techs
         }
         for future in as_completed(futures):
-            endpoints.extend(future.result())
-    return endpoints
+            result = future.result()
+            endpoints.extend(result.endpoints)
+            errors.extend(result.errors)
+
+    # One unreadable file is reported by every view's scan that walked past it,
+    # so the same skip arrives up to five times. It is one fact.
+    return ScanResult(endpoints=endpoints, errors=list(dict.fromkeys(errors)))
 
 
 def _convert(item: dict, source_name: str) -> RawEndpoint:

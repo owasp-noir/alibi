@@ -9,7 +9,7 @@ from ..rules import Finding, Skipped
 
 
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
-          sources: list[str]) -> dict:
+          sources: list[str], errors: list = ()) -> dict:
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
         for view in entry.views:
@@ -17,12 +17,21 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
 
     return {
         "sources": sources,
+        "scan_errors": [
+            {"tech": e.tech, "message": e.message, "source": e.source}
+            for e in errors
+        ],
         "summary": {
             "endpoints": len(index.entries),
             "corroborated": index.corroborated,
             "findings": len(findings),
             "near_misses": index.near_miss_count,
+            "degraded": bool(errors),
             "views": view_counts,
+            "coverage": {
+                view: {"rules": rules, "reaches": reached, "of": total}
+                for view, (rules, reached, total) in index.coverage_stats().items()
+            },
         },
         "findings": [_finding(f) for f in findings],
         "skipped_rules": [
@@ -72,5 +81,5 @@ def _finding(finding: Finding) -> dict:
 
 
 def dump(index: Index, findings: list[Finding], skipped: list[Skipped],
-         sources: list[str]) -> str:
-    return json.dumps(build(index, findings, skipped, sources), indent=2)
+         sources: list[str], errors: list = ()) -> str:
+    return json.dumps(build(index, findings, skipped, sources, errors), indent=2)

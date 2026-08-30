@@ -44,6 +44,7 @@ def render(
     skipped: list[Skipped],
     rules: RuleSet,
     sources: list[str],
+    errors: list = (),
     stream=sys.stdout,
 ) -> None:
     paint = Painter(_use_color(stream))
@@ -66,6 +67,23 @@ def render(
     out()
     out("  " + paint(f"{index.corroborated} corroborated", "ok")
         + paint(" -- vouched for by more than one view", "dim"))
+
+    for view, (rules_count, reached, total) in index.coverage_stats().items():
+        share = f"{reached / total * 100:.0f}%" if total else "n/a"
+        out("  " + paint(
+            f"{view}: {rules_count} rule{'s' if rules_count != 1 else ''} "
+            f"reaching {reached} of {total} code endpoints ({share})", "dim"))
+
+    # Anything noir could not read goes above the findings, because it changes
+    # what the findings mean. A specification skipped for being too large reads
+    # downstream as "this project documents nothing".
+    if errors:
+        out()
+        out(paint("NOIR COULD NOT READ EVERYTHING", "high"))
+        out(paint("  Views below may be incomplete, and a missing view is not "
+                  "the same as an empty one.", "dim"))
+        for error in errors:
+            out(paint(f"  [{error.tech}] {_wrap(_trim(error.message), indent='    ')}", "dim"))
 
     # The near-miss count is the tool's own error bar. It belongs next to the
     # totals, not buried under the findings, because every finding below is
@@ -203,6 +221,19 @@ def _render_skipped(skipped: list[Skipped], paint: Painter, out) -> None:
         out(paint("Rules that did not run", "dim"))
         for item in quiet:
             out(paint(f"  {item.rule_id:<12} {item.detail}", "dim"))
+
+
+def _trim(message: str, limit: int = 160) -> str:
+    """Keep a skip report readable.
+
+    Noir lists every path it skipped, which for a repository full of test
+    symlinks is a paragraph of absolute paths. The count and the first example
+    carry the meaning; the full list is in `-f json`.
+    """
+    if len(message) <= limit:
+        return message
+    head, _, _ = message[:limit].rpartition(", ")
+    return f"{head or message[:limit]} ... (full list in -f json)"
 
 
 def _wrap(text: str, width: int = 74, indent: str = "  ") -> str:

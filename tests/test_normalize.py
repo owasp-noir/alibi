@@ -91,7 +91,7 @@ def test_query_string_is_split_off_but_an_optional_param_is_not():
     assert optional.query is None
 
 
-def test_methods_are_upper_cased_and_non_http_verbs_flagged():
+def test_methods_are_upper_cased_and_non_http_verbs_flagged():  # noqa
     assert normalize("/x", "get").key.method == "GET"
     assert normalize("/x", "SEND").non_http is True
     assert normalize("/x", "POST").non_http is False
@@ -111,3 +111,36 @@ def test_a_dangling_question_mark_never_splits_an_endpoint():
     assert normalize("/search?").key == normalize("/search").key
     # But a `?` in the middle is part of the path, not punctuation.
     assert normalize("/a?b").key.path == "/a?b"
+
+
+def test_a_cli_command_is_not_an_http_path():
+    """`cli://gitops-engine/agent` read as HTTP becomes `/agent`.
+
+    Noir reports genuine non-web attack surface -- CLI arguments, Kafka topics,
+    mobile deep links -- in the same endpoint list. Flattened into the HTTP
+    space they collide with real routes and get asked whether a gateway routes
+    to them, which is meaningless.
+    """
+    cli = normalize("cli://gitops-engine/agent", "CLI", "cli")
+    http = normalize("/agent", "GET", "http")
+
+    assert cli.key != http.key
+    assert cli.key.protocol == "cli"
+    assert cli.key.http is False
+    assert http.key.http is True
+
+
+def test_https_and_http_describe_one_space():
+    """A spec with an `https` server block documents the code's own routes."""
+    secure = normalize("https://api.example.com/v1/users", "GET", "https")
+    plain = normalize("/v1/users", "GET", "http")
+    assert secure.key == plain.key
+
+
+def test_each_non_web_protocol_keeps_its_own_space():
+    paths = [
+        normalize("/topic", "PUBLISH", "kafka").key,
+        normalize("/topic", "PUBLISH", "amqp").key,
+        normalize("/topic", "PUBLISH", "mqtt").key,
+    ]
+    assert len(set(paths)) == 3
