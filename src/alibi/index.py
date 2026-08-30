@@ -99,7 +99,6 @@ class NearMiss:
 @dataclass
 class Index:
     entries: dict[Key, Entry] = field(default_factory=dict)
-    unmapped_techs: set[str] = field(default_factory=set)
     # Gateways and infrastructure declare routing rules rather than endpoints,
     # so they are kept as coverage predicates as well as entries. The entries
     # are what "this gateway rule matches nothing" is asked about; the coverage

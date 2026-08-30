@@ -31,7 +31,7 @@ Two placeholder tokens come out of this module:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 # Sentinels stand in for substituted spans while the remaining literal text is
@@ -115,7 +115,6 @@ class Normalized:
     param_names: tuple[str, ...] = ()
     spans_segments: bool = False
     non_http: bool = False
-    notes: list[str] = field(default_factory=list)
 
     @property
     def renamed(self) -> bool:
@@ -242,7 +241,6 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     """Reduce a noir endpoint URL, method and protocol to a comparable key."""
     raw = (url or "").strip()
     host: str | None = None
-    notes: list[str] = []
 
     if "://" in raw:
         parts = urlsplit(raw)
@@ -282,7 +280,6 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     # coverage evaluator, which reads `original_path`, not the key.
     if len(canon_path) > 1 and canon_path.endswith("/"):
         canon_path = canon_path.rstrip("/")
-        notes.append("trailing slash dropped")
 
     norm_method, odd_verb = split_method(method)
     space = HTTP if (protocol or "").lower() in HTTP_PROTOCOLS else protocol.lower()
@@ -297,5 +294,4 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
         param_names=tuple(names),
         spans_segments=spans,
         non_http=non_http,
-        notes=notes,
     )

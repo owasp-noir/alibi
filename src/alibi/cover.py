@@ -140,6 +140,3 @@ class Coverage:
 
     def covers(self, target: Key) -> bool:
         return self.reaching(target) is not None
-
-    def reaches_any(self, targets: list[Key]) -> bool:
-        return any(self.covers(target) for target in targets)

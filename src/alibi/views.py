@@ -9,10 +9,11 @@ import yaml
 
 _VIEWS_FILE = Path(__file__).with_name("views.yml")
 
-# Absence of an endpoint from a curated collection says nothing -- somebody
-# simply never wrote that request down. Absence from an observed capture is
-# weak evidence of disuse. Rules that reason about absence consult this.
-OBSERVED = "observed"
+# The one distinction that matters about a traffic source: a capture records
+# requests that happened, a collection records requests somebody meant to make.
+# Absence from a capture is weak evidence of disuse; absence from a collection
+# is no evidence at all. `views.yml` spells these as `kind: observed` and
+# `kind: curated`, and only the curated case changes any behaviour.
 CURATED = "curated"
 
 
