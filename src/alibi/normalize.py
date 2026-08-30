@@ -46,11 +46,26 @@ _ANGLE = re.compile(r"<(?:(?P<conv>[A-Za-z_][\w.]*)\s*:)?(?P<name>[^<>/]*)>")
 # {id}, {id:int}, {id?}, {*rest}, {**rest}  -- OpenAPI, Spring, ASP.NET, Laravel
 _BRACE = re.compile(r"\{(?P<body>[^{}/]*)\}")
 
+# {name=attachments/*}  -- a gRPC-gateway resource pattern. The body is a path
+# of its own, and it is the path this endpoint actually answers on:
+# `{name=attachments/*}` serves `/attachments/123`. So the pattern is expanded
+# in place rather than collapsed -- `attachments/{}` matches the code route
+# that serves it, where a bare wildcard would have merged every resource in the
+# API into one endpoint.
+_RESOURCE_PATTERN = re.compile(r"\{(?P<name>[^{}=]*)=(?P<pattern>[^{}]*)\}")
+
 # (?<id>\d+), (?P<id>[0-9]+)  -- named capture groups from gateway configs
 _NAMED_GROUP = re.compile(r"\(\?P?<(?P<name>[A-Za-z_]\w*)>[^)]*\)")
 
-# :id, :id?  -- Rails, Express, Gin, Echo, Koa
-_COLON = re.compile(r":(?P<name>[A-Za-z_]\w*)\??")
+# :id, :id?  -- Rails, Express, Gin, Echo, Koa.
+#
+# Anchored to the start of the segment, which is what separates a parameter
+# from a custom method. `/posts/:id` names a parameter; `/v1/memos:batchGet`
+# and `/v1/things/{id}:cancel` name an operation on a resource, and the verb
+# after the colon is as literal as the resource before it. Unanchored, every
+# custom method became a parameter -- `ai:chat` and `ai:transcribe` both
+# normalized to `/api/v1/ai{}` and merged into one endpoint.
+_COLON = re.compile(r"(?<![^/]):(?P<name>[A-Za-z_]\w*)\??")
 
 # *action, *, **  -- splat / catch-all
 _SPLAT = re.compile(r"\*{1,2}(?P<name>[A-Za-z_]\w*)?")
@@ -271,8 +286,27 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     # `//api//v1` and `/api/v1` address the same resource.
     path = re.sub(r"/{2,}", "/", path)
 
+    # A gRPC-gateway resource pattern holds a path inside a brace, so it has to
+    # go before the split on `/` -- otherwise `{name=attachments/*}` arrives as
+    # two segments, neither of them valid.
+    resource_names: list[str] = []
+
+    def take_resource(match: re.Match[str]) -> str:
+        name = match.group("name").strip()
+        if name:
+            resource_names.append(name)
+        # `*` inside the pattern stands for one segment and `**` for the rest,
+        # matching the gRPC transcoding spec.
+        expanded = match.group("pattern").strip()
+        expanded = expanded.replace("**", _WILD)
+        return "/".join(
+            _PARAM if part == "*" else part for part in expanded.split("/")
+        )
+
+    path = _RESOURCE_PATTERN.sub(take_resource, path)
+
     original_path = path
-    names: list[str] = []
+    names: list[str] = list(resource_names)
     spans = False
     out: list[str] = []
 
@@ -281,7 +315,7 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
             out.append("")
             continue
         canon, seg_spans = _canon_segment(seg, names)
-        spans = spans or seg_spans
+        spans = spans or seg_spans or _WILD in seg
         out.append(canon)
 
     canon_path = "/" + "/".join(out)

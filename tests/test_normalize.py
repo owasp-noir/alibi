@@ -144,3 +144,49 @@ def test_each_non_web_protocol_keeps_its_own_space():
         normalize("/topic", "PUBLISH", "mqtt").key,
     ]
     assert len(set(paths)) == 3
+
+
+def test_a_custom_method_is_not_a_parameter():
+    """`/v1/memos:batchGet` names an operation, not a variable.
+
+    gRPC-gateway and Google's API guidelines put a custom method after a colon
+    on the resource itself. Read as a parameter, every one of them collapsed
+    into its neighbours: memos serves both `/api/v1/ai:chat` and
+    `/api/v1/ai:transcribe`, and both normalized to `/api/v1/ai{}`.
+    """
+    chat = normalize("/api/v1/ai:chat")
+    transcribe = normalize("/api/v1/ai:transcribe")
+
+    assert chat.key.path == "/api/v1/ai:chat"
+    assert transcribe.key.path == "/api/v1/ai:transcribe"
+    assert chat.key != transcribe.key
+
+    # A parameter starts the segment; a custom method follows a resource.
+    assert normalize("/v1/things/{id}:cancel").key.path == "/v1/things/{}:cancel"
+    assert normalize("/posts/:id").key.path == "/posts/{}"
+
+
+def test_a_grpc_resource_pattern_expands_to_the_path_it_serves():
+    """`{name=attachments/*}` answers on `/attachments/123`.
+
+    The pattern body is the path, so it is expanded in place. Collapsing it to
+    a bare wildcard merged every resource in memos's API into one endpoint --
+    `{name=attachments/*}` and `{name=memos/*}` are not the same route.
+    """
+    assert normalize("/api/v1/{name=attachments/*}").key.path == "/api/v1/attachments/{}"
+    assert normalize("/api/v1/{name=memos/*}").key.path == "/api/v1/memos/{}"
+    assert (normalize("/api/v1/{parent=users/*}/settings").key.path
+            == "/api/v1/users/{}/settings")
+
+
+def test_a_double_star_in_a_resource_pattern_spans_segments():
+    result = normalize("/v1/{name=shelves/*/books/**}")
+    assert result.key.path == "/v1/shelves/{}/books/*"
+    assert result.spans_segments is True
+
+
+def test_an_expanded_pattern_meets_the_route_that_serves_it():
+    """The point of expanding rather than collapsing."""
+    documented = normalize("/api/v1/{name=attachments/*}", "GET")
+    implemented = normalize("/api/v1/attachments/{id}", "GET")
+    assert documented.key == implemented.key
