@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           # There is no uv.lock: CI installs unlocked so that an upstream
           # release breaking this package shows up here rather than in a bug
