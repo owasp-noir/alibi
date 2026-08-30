@@ -24,7 +24,11 @@ jobs:
         run: |
           uv venv --python ${{ matrix.python }}
           uv pip install -e .
-          uv pip install pytest
+          # The dev group, not just pytest: jsonschema is what holds the SARIF
+          # report to the published 2.1.0 schema, and without it those tests
+          # skip themselves. A validation that quietly does not run is worse
+          # than none, because the badge still passes.
+          uv pip install --group dev
 
       # Most of the suite runs without noir; the end-to-end tests skip
       # themselves when it is absent, which is why it is not installed here.

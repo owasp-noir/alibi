@@ -36,7 +36,10 @@ alibi = "alibi.cli:main"
 packages = ["src/alibi"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+# jsonschema holds the SARIF report to the published 2.1.0 schema. Nothing in
+# this repository reads SARIF, so without it a malformed document passes review
+# and is rejected on upload.
+dev = ["pytest>=8.0", "jsonschema>=4.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

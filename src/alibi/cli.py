@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import collect
+from . import collect, snapshot
 from .ignore import IgnoreList
 from .index import build as build_index
-from .report import json_report, text
+from .report import history as history_report
+from .report import json_report, sarif, text
 from .rules import RuleSet
 from .views import ViewMap
 
@@ -28,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     scan = sub.add_parser("scan", help="scan sources and report where the views disagree")
     scan.add_argument("paths", nargs="+", metavar="PATH",
                       help="anything noir can read: a codebase, a spec directory, a capture file")
-    scan.add_argument("-f", "--format", choices=["text", "json"], default="text")
+    scan.add_argument("-f", "--format", choices=["text", "json", "sarif"], default="text")
     scan.add_argument("--noir-bin", help="path to the noir binary (default: found on PATH)")
     scan.add_argument("--views", help="alternative views.yml")
     scan.add_argument("--rules", help="alternative rules.yml")
@@ -40,11 +41,20 @@ def main(argv: list[str] | None = None) -> int:
                       help="suppress findings whose path matches (repeatable)")
     scan.add_argument("--ignore-file", metavar="FILE",
                       help="suppression list (default: .alibi.yml beside the source)")
+    scan.add_argument("--snapshot", nargs="?", metavar="PATH",
+                      const=str(snapshot.DEFAULT_PATH),
+                      help="record this scan so `alibi history` can report what "
+                           f"changed (default: {snapshot.DEFAULT_PATH})")
 
     doctor = sub.add_parser(
         "doctor", help="check the view map against this noir build's catalog")
     doctor.add_argument("--noir-bin")
     doctor.add_argument("--views")
+
+    history = sub.add_parser(
+        "history", help="report what changed since the previous recorded scan")
+    history.add_argument("path", nargs="?", default=str(snapshot.DEFAULT_PATH),
+                         metavar="PATH", help="a snapshot database")
 
     args = parser.parse_args(argv)
 
@@ -53,7 +63,10 @@ def main(argv: list[str] | None = None) -> int:
             return _scan(args)
         if args.command == "doctor":
             return _doctor(args)
-    except (collect.NoirNotFound, collect.NoirFailed) as exc:
+        if args.command == "history":
+            return _history(args)
+    except (collect.NoirNotFound, collect.NoirFailed,
+            snapshot.SnapshotError) as exc:
         print(f"alibi: {exc}", file=sys.stderr)
         return EXIT_ERROR
     return EXIT_ERROR
@@ -91,13 +104,29 @@ def _scan(args) -> int:
 
     if args.format == "json":
         print(json_report.dump(index, findings, skipped, names, errors, suppressed))
+    elif args.format == "sarif":
+        print(sarif.dump(index, findings, skipped, names, rules, errors,
+                         suppressed))
     else:
         text.render(index, findings, skipped, rules, names, errors, suppressed)
+
+    # After the report: a snapshot that cannot be written should not cost the
+    # user the scan they just paid for.
+    if args.snapshot:
+        snapshot.record(args.snapshot, index, findings, names)
 
     if args.fail_on:
         threshold = rules.severities.index(args.fail_on)
         if any(rules.severities.index(f.severity) >= threshold for f in findings):
             return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _history(args) -> int:
+    # The ruleset is loaded for its severity ladder alone: a snapshot records
+    # the severity a finding was reported at, not where that rung sits.
+    severities = RuleSet.load().severities
+    history_report.render(snapshot.history(args.path), severities)
     return EXIT_OK
 
 
