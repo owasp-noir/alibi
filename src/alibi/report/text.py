@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from ..index import GRADE_LONE, Index
-from ..scope import Hint, suggest
+from ..scope import Hint, TestHint, from_tests, suggest
 from ..rules import Finding, RuleSet, Skipped
 
 # How many findings of one kind to print before saying how many are left.
@@ -176,6 +176,7 @@ def render(
                       f"({rule_id} in full: -f json)", "dim"))
 
     _render_scope_hint(suggest(index, findings, rules), paint, out)
+    _render_test_hint(from_tests(findings, index), paint, out)
     _render_near_misses(index, paint, out)
     _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)
@@ -326,6 +327,21 @@ def _render_scope_hint(hint: Hint | None, paint: Painter, out) -> None:
     out(paint(f"    alibi scan <paths> --ignore '{hint.ignore_pattern}'", "dim"))
     out(paint(f"  If it is the same surface left undocumented, they are the "
               f"findings that matter most.", "dim"))
+
+
+def _render_test_hint(hint: TestHint | None, paint: Painter, out) -> None:
+    """Say how much of this is about code that never ships."""
+    if hint is None:
+        return
+    # One glob per flag: noir's --exclude-path takes a single pattern, and a
+    # second bare glob is read as another scan base.
+    globs = " ".join(f"--exclude-path '{g}'" for g in hint.exclude_globs)
+    out()
+    out(paint("MOSTLY TEST CODE?", "bold"))
+    out(paint(f"  {hint.findings} of {hint.total} findings come from files under "
+              f"{', '.join(hint.directories)}.\n  If those are fixtures rather "
+              f"than the surface you ship, leave them out:", "dim"))
+    out(paint(f"    alibi scan <paths> -- {globs}", "dim"))
 
 
 def _render_near_misses(index: Index, paint: Painter, out) -> None:

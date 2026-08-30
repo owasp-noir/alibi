@@ -33,6 +33,21 @@ CONCENTRATION = 0.90
 # Below this many findings outside the prefix, there is nothing to save anyone.
 MIN_OUTSIDE = 10
 
+# Directory names that mean "this is not the shipped surface". Naming test
+# directories is about as settled as software conventions get, which is why
+# this is a list of names rather than a guess about content.
+TEST_DIRECTORIES = (
+    "test", "tests", "spec", "specs", "__tests__", "e2e",
+    "fixture", "fixtures", "testdata", "mock", "mocks",
+)
+
+_TEST_SEGMENT = re.compile(
+    r"(^|/)(" + "|".join(TEST_DIRECTORIES) + r")(/|$)", re.IGNORECASE)
+
+# A share this small is not worth a paragraph, however many findings it is.
+TEST_SHARE = 0.20
+MIN_TEST_FINDINGS = 10
+
 
 @dataclass(frozen=True)
 class Hint:
@@ -105,6 +120,83 @@ def suggest(index: Index, findings: list, ruleset=None,
         inside=len(findings) - len(outside),
         outside=len(outside),
     )
+
+
+@dataclass(frozen=True)
+class TestHint:
+    findings: int
+    total: int
+    directories: list[str]
+
+    @property
+    def share(self) -> int:
+        return round(self.findings / self.total * 100)
+
+    @property
+    def exclude_globs(self) -> list[str]:
+        return [f"**/{name}/**" for name in self.directories]
+
+
+def from_tests(findings: list, index=None) -> TestHint | None:
+    """Are most of these findings about code that never ships?
+
+    Directus keeps e2e snapshots listing every collection its test suite
+    creates, and noir reads them as endpoints: `/items/articles_1234` beside
+    the documented `/items/{collection}`. 145 of its 281 findings came from
+    test directories, and every one of them near-missed a real endpoint.
+
+    A directory another view depends on is never suggested. Directus keeps its
+    OpenAPI document in `packages/specs/`, and `specs` is on the list of names
+    that usually mean fixtures -- excluding it would have deleted the contract
+    the comparison runs against, on this tool's own advice.
+
+    Reported, not acted on, like the scope hint. Some projects genuinely serve
+    routes defined under a directory named `spec`, and no reading of a path can
+    tell that from a fixture.
+    """
+    if not findings:
+        return None
+
+    seen: set[str] = set()
+    from_test = 0
+    for finding in findings:
+        matched = False
+        for code_path in finding.entry.code_paths():
+            path = code_path.get("path") or ""
+            for match in _TEST_SEGMENT.finditer(path.replace("\\", "/")):
+                seen.add(match.group(2).lower())
+                matched = True
+        if matched:
+            from_test += 1
+
+    if from_test < MIN_TEST_FINDINGS:
+        return None
+    if from_test / len(findings) < TEST_SHARE:
+        return None
+
+    suggestable = sorted(seen - _load_bearing(index))
+    if not suggestable:
+        return None
+
+    return TestHint(findings=from_test, total=len(findings),
+                    directories=suggestable)
+
+
+def _load_bearing(index) -> set[str]:
+    """Directory names some view other than code is reached through."""
+    if index is None:
+        return set()
+
+    names: set[str] = set()
+    for entry in index.entries.values():
+        for observation in entry.observations:
+            if observation.view == "code":
+                continue
+            for code_path in observation.raw.code_paths:
+                path = (code_path.get("path") or "").replace("\\", "/")
+                for match in _TEST_SEGMENT.finditer(path):
+                    names.add(match.group(2).lower())
+    return names
 
 
 def applies(pattern: str, path: str) -> bool:

@@ -121,3 +121,25 @@ def test_scan_accepts_no_paths_at_all(capsys):
 
     assert main(["scan", "--noir-bin", "/nonexistent/noir"]) == EXIT_ERROR
     assert "no noir binary" in capsys.readouterr().err
+
+
+def test_arguments_after_a_bare_dash_dash_go_to_noir():
+    """`--noir-arg` exists to hand noir a flag, and argparse refused one.
+
+    A value starting with a dash came back as a usage block -- so the one
+    thing the option is for did not work. The joined form always did; this is
+    the form people reach for first.
+    """
+    from alibi.cli import split_passthrough
+
+    head, tail = split_passthrough(
+        ["scan", ".", "-f", "json", "--", "--exclude-path", "**/tests/**"])
+
+    assert head == ["scan", ".", "-f", "json"]
+    assert tail == ["--exclude-path", "**/tests/**"]
+
+
+def test_without_a_separator_nothing_is_passed_through():
+    from alibi.cli import split_passthrough
+
+    assert split_passthrough(["scan", "."]) == (["scan", "."], [])

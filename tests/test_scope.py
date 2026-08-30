@@ -83,3 +83,70 @@ def test_findings_about_other_views_do_not_drive_the_hint(endpoint, view_map):
     assert {f.rule_id for f in findings} == {"UNEXPOSED"}
     assert all(not f.key.path.startswith("/api/") for f in findings)
     assert suggest(index, findings, ruleset) is None
+
+
+def test_findings_that_are_mostly_test_fixtures_are_reported_as_such(
+    endpoint, view_map
+):
+    """Directus keeps e2e snapshots listing every collection its suite creates.
+
+    Noir reads them as endpoints -- `/items/articles_1234` beside the
+    documented `/items/{collection}` -- and 145 of its 281 findings came from
+    test directories, each one near-missing a real endpoint.
+    """
+    from alibi.scope import from_tests
+
+    endpoints = [
+        endpoint(f"/items/fixture_{i}", "GET", "python_flask",
+                 code_paths=({"path": f"tests/e2e/snapshot_{i}.json"},))
+        for i in range(15)
+    ]
+    endpoints += [endpoint("/anchor", "GET", "oas3"),
+                  endpoint("/anchor", "GET", "python_flask")]
+
+    index, findings, _ = scan(endpoints, view_map)
+    hint = from_tests(findings, index)
+
+    assert hint is not None
+    assert hint.directories == ["tests"]
+    assert hint.exclude_globs == ["**/tests/**"]
+
+
+def test_a_directory_another_view_needs_is_never_suggested(endpoint, view_map):
+    """Directus keeps its OpenAPI document in `packages/specs/`.
+
+    `specs` is on the list of names that usually mean fixtures, and suggesting
+    it would have deleted the contract the comparison runs against -- on this
+    tool's own advice.
+    """
+    from alibi.scope import from_tests
+
+    endpoints = [
+        endpoint(f"/items/fixture_{i}", "GET", "python_flask",
+                 code_paths=({"path": f"specs/e2e/snapshot_{i}.json"},))
+        for i in range(15)
+    ]
+    endpoints += [
+        endpoint("/anchor", "GET", "oas3",
+                 code_paths=({"path": "packages/specs/src/openapi.yaml"},)),
+        endpoint("/anchor", "GET", "python_flask"),
+    ]
+
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index) is None
+
+
+def test_a_handful_of_test_findings_is_not_worth_a_paragraph(endpoint, view_map):
+    from alibi.scope import from_tests
+
+    endpoints = [
+        endpoint("/items/one", "GET", "python_flask",
+                 code_paths=({"path": "tests/x.py"},)),
+    ]
+    endpoints += [endpoint(f"/real/{i}", "GET", "python_flask") for i in range(20)]
+    endpoints += [endpoint("/anchor", "GET", "oas3"),
+                  endpoint("/anchor", "GET", "python_flask")]
+
+    index, findings, _ = scan(endpoints, view_map)
+    assert from_tests(findings, index) is None

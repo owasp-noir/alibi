@@ -18,7 +18,24 @@ EXIT_FINDINGS = 1
 EXIT_ERROR = 2
 
 
+def split_passthrough(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Everything after a bare `--` belongs to noir.
+
+    `--noir-arg` exists to hand noir a flag, and argparse rejects a value that
+    starts with a dash -- so the one thing the option is for came back as a
+    usage block. The joined form works, and now so does the convention people
+    reach for first: `alibi scan . -- --exclude-path '**/tests/**'`.
+    """
+    if "--" not in argv:
+        return argv, []
+    cut = argv.index("--")
+    return argv[:cut], argv[cut + 1:]
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    argv, passthrough = split_passthrough(argv)
+
     parser = argparse.ArgumentParser(
         prog="alibi",
         description="Cross-check the views of your attack surface and find the "
@@ -40,7 +57,10 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"],
                       help="exit non-zero when a finding reaches this severity")
     scan.add_argument("--noir-arg", action="append", default=[], metavar="ARG",
-                      help="extra argument passed through to noir (repeatable)")
+                      help="one argument passed through to noir; repeatable. "
+                           "A value starting with a dash needs the joined form, "
+                           "--noir-arg=--exclude-path=..., or put it after a "
+                           "bare -- instead")
     scan.add_argument("--ignore", action="append", default=[], metavar="REGEX",
                       help="suppress findings whose path matches (repeatable)")
     scan.add_argument("--ignore-file", metavar="FILE",
@@ -61,6 +81,12 @@ def main(argv: list[str] | None = None) -> int:
                          metavar="PATH", help="a snapshot database")
 
     args = parser.parse_args(argv)
+    if passthrough:
+        if args.command != "scan":
+            print(f"alibi: arguments after -- are for noir, and "
+                  f"`{args.command}` does not run it", file=sys.stderr)
+            return EXIT_ERROR
+        args.noir_arg = list(args.noir_arg) + passthrough
 
     try:
         if args.command == "scan":

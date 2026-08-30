@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from ..index import Index
-from ..scope import suggest
+from ..scope import from_tests, suggest
 from ..rules import Finding, Skipped
 
 
@@ -40,6 +40,11 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             },
         },
         "scope_hint": _hint(suggest(index, findings, ruleset)),
+        "test_hint": (
+            {"findings": th.findings, "total": th.total,
+             "directories": th.directories, "exclude": th.exclude_globs}
+            if (th := from_tests(findings, index)) else None
+        ),
         "conflated": [
             {"endpoint": str(key), "contract_directories": directories}
             for key, directories in index.conflated()
