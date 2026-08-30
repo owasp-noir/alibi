@@ -37,7 +37,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,7 +55,7 @@ DEFAULT_PATH = Path(".alibi/snapshots.db")
 # first change lands, this equality check becomes a walk from the stored
 # version up to this one through an ordered list of upgrade steps, applied in
 # a single transaction -- there are no steps yet, so there is no list yet.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # The version marker is created and read before anything else is touched, so a
 # database this alibi cannot read is not written to on the way to refusing it.
@@ -70,7 +70,11 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS scan (
     id      INTEGER PRIMARY KEY,
     at      TEXT NOT NULL,
-    sources TEXT NOT NULL
+    sources TEXT NOT NULL,
+    -- Whether this scan recorded which rules evaluated. An empty ran_rule set
+    -- is a real answer -- a scan where nothing had the views it needed -- and
+    -- has to be told apart from a scan that never recorded the question.
+    rules_recorded INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sighting (
@@ -79,6 +83,16 @@ CREATE TABLE IF NOT EXISTS sighting (
     path    TEXT NOT NULL,
     view    TEXT NOT NULL,
     PRIMARY KEY (scan_id, method, path, view)
+);
+
+-- Which rules actually ran. Without this, a scan that forgot to include the
+-- contracts directory has no findings from SHADOW, and the next comparison
+-- reads that as every shadow API having been fixed. The rules already refuse
+-- to report a comparison that did not happen; history has to refuse it too.
+CREATE TABLE IF NOT EXISTS ran_rule (
+    scan_id INTEGER NOT NULL REFERENCES scan(id),
+    rule_id TEXT NOT NULL,
+    PRIMARY KEY (scan_id, rule_id)
 );
 
 CREATE TABLE IF NOT EXISTS finding (
@@ -129,11 +143,20 @@ class History:
     previous_at: str | None
     new: list[Change]
     resolved: list[Change]
+    # Rules that ran in the earlier scan and not in this one. Their findings
+    # are neither new nor resolved -- they were not looked for.
+    not_compared: list[str] = dataclass_field(default_factory=list)
 
 
 def record(db_path: Path | str, index: Index, findings: list[Finding],
-           sources: list[str], when: str | None = None) -> int:
+           sources: list[str], ran: list[str] | None = None,
+           when: str | None = None) -> int:
     """Write one scan and return its id.
+
+    `ran` names the rules that actually evaluated. It is what keeps a
+    misconfigured scan from reading as progress: point alibi at the code and
+    forget the contracts, and SHADOW produces nothing -- indistinguishable, to
+    a later comparison, from every shadow API having been closed.
 
     `when` exists so a test can place two scans on separate days without
     waiting for a clock to move.
@@ -143,8 +166,8 @@ def record(db_path: Path | str, index: Index, findings: list[Finding],
 
     with _open(path) as conn:
         cursor = conn.execute(
-            "INSERT INTO scan (at, sources) VALUES (?, ?)",
-            (when or _now(), json.dumps(list(sources))),
+            "INSERT INTO scan (at, sources, rules_recorded) VALUES (?, ?, ?)",
+            (when or _now(), json.dumps(list(sources)), int(ran is not None)),
         )
         scan_id = int(cursor.lastrowid)
 
@@ -155,6 +178,10 @@ def record(db_path: Path | str, index: Index, findings: list[Finding],
                 for entry in index.entries.values()
                 for view in sorted(entry.views)
             ],
+        )
+        conn.executemany(
+            "INSERT INTO ran_rule (scan_id, rule_id) VALUES (?, ?)",
+            [(scan_id, rule_id) for rule_id in sorted(set(ran or []))],
         )
         conn.executemany(
             "INSERT INTO finding (scan_id, rule_id, method, path, severity) "
@@ -188,14 +215,50 @@ def history(db_path: Path | str) -> History:
             return History(path, total, current_at, None, [], [])
 
         previous_id, previous_at = scans[1]
+
+        # A rule that ran before and not now compared nothing this time, so
+        # its findings did not disappear -- nobody looked. Reporting them as
+        # resolved would turn a forgotten `--` argument into a progress report.
+        now_ran = _ran(conn, current_id)
+        then_ran = _ran(conn, previous_id)
+        known = now_ran is not None and then_ran is not None
+        comparable = (now_ran & then_ran) if known else None
+        stopped = sorted(then_ran - now_ran) if known else []
+
         return History(
             path=path,
             scans=total,
             current_at=current_at,
             previous_at=previous_at,
-            new=_difference(conn, current_id, previous_id),
-            resolved=_difference(conn, previous_id, current_id),
+            new=_difference(conn, current_id, previous_id, comparable),
+            resolved=_difference(conn, previous_id, current_id, comparable),
+            not_compared=stopped,
         )
+
+
+def _ran(conn, scan_id: int) -> set[str] | None:
+    """Which rules evaluated in that scan, or None when it was not recorded.
+
+    Guessing is worse than not knowing. The rules that produced findings look
+    like a reasonable substitute and are not one -- a rule that ran and found
+    nothing is indistinguishable from a rule that never ran, which is the exact
+    confusion this table exists to end. So an unrecorded scan disables the
+    check rather than driving it from an inference.
+
+    The flag on the scan row carries that distinction, because an empty set of
+    rules is itself a real answer: a scan where nothing had the views it needed
+    ran no rules at all, and must not read as one that forgot to say.
+    """
+    recorded = conn.execute(
+        "SELECT rules_recorded FROM scan WHERE id = ?", (scan_id,)
+    ).fetchone()
+    if not recorded or not recorded[0]:
+        return None
+
+    rows = conn.execute(
+        "SELECT rule_id FROM ran_rule WHERE scan_id = ?", (scan_id,)
+    ).fetchall()
+    return {row[0] for row in rows}
 
 
 def timeline(db_path: Path | str, method: str, path: str) -> Timeline:
@@ -204,8 +267,14 @@ def timeline(db_path: Path | str, method: str, path: str) -> Timeline:
         return _timeline(conn, method, path)
 
 
-def _difference(conn: sqlite3.Connection, present: int, absent: int) -> list[Change]:
-    """Findings recorded in one scan and not in the other."""
+def _difference(conn: sqlite3.Connection, present: int, absent: int,
+                comparable: set[str] | None = None) -> list[Change]:
+    """Findings recorded in one scan and not in the other.
+
+    `comparable` restricts the answer to rules that evaluated in both scans.
+    Everything else was not looked for, and a finding nobody looked for has
+    neither appeared nor gone away.
+    """
     rows = conn.execute(
         """
         SELECT f.rule_id, f.method, f.path, f.severity
@@ -221,6 +290,9 @@ def _difference(conn: sqlite3.Connection, present: int, absent: int) -> list[Cha
         """,
         (present, absent),
     ).fetchall()
+
+    if comparable is not None:
+        rows = [row for row in rows if row[0] in comparable]
 
     return [
         Change(

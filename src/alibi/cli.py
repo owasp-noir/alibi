@@ -114,7 +114,9 @@ def _scan(args) -> int:
     # After the report: a snapshot that cannot be written should not cost the
     # user the scan they just paid for.
     if args.snapshot:
-        snapshot.record(args.snapshot, index, findings, names)
+        held_back = {item.rule_id for item in skipped}
+        ran = [rule["id"] for rule in rules.rules if rule["id"] not in held_back]
+        snapshot.record(args.snapshot, index, findings, names, ran)
 
     if args.fail_on:
         threshold = rules.severities.index(args.fail_on)

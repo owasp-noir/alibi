@@ -310,3 +310,74 @@ def test_the_history_command_reports_what_changed(db, record, endpoint, capsys):
     assert "RESOLVED" in out
     assert "DELETE  /was-here" in out
     assert f"reported since {DAY1}" in out
+
+
+def test_a_rule_that_stopped_running_is_not_a_pile_of_resolved_findings(
+    tmp_path, endpoint, view_map
+):
+    """The trap this whole comparison had to be built around.
+
+    Point alibi at the code and forget the contracts directory, and SHADOW
+    evaluates nothing. To a naive difference that is indistinguishable from
+    every shadow API having been closed -- so a forgotten argument reads as a
+    week of security work, in the one report a team would take at face value.
+    """
+    db = tmp_path / "snapshots.db"
+
+    full = [
+        endpoint("/undocumented", "GET", "python_flask"),
+        endpoint("/kept", "GET", "python_flask"),
+        endpoint("/kept", "GET", "oas3"),
+    ]
+    index, findings, ran = _evaluate(full, view_map)
+    assert {f.rule_id for f in findings} == {"SHADOW"}
+    snapshot.record(db, index, findings, ["all"], ran)
+
+    # The same code, scanned without the contracts.
+    code_only = [e for e in full if e.technology != "oas3"]
+    index, findings, ran = _evaluate(code_only, view_map)
+    assert findings == []
+    snapshot.record(db, index, findings, ["code"], ran)
+
+    history = snapshot.history(db)
+
+    assert history.resolved == []
+    assert "SHADOW" in history.not_compared
+
+
+def test_a_rule_running_in_both_scans_still_resolves_normally(
+    tmp_path, endpoint, view_map
+):
+    """The guard must not swallow real progress."""
+    db = tmp_path / "snapshots.db"
+
+    before = [
+        endpoint("/undocumented", "GET", "python_flask"),
+        endpoint("/kept", "GET", "python_flask"),
+        endpoint("/kept", "GET", "oas3"),
+    ]
+    index, findings, ran = _evaluate(before, view_map)
+    snapshot.record(db, index, findings, ["all"], ran)
+
+    # Someone documented it.
+    after = before + [endpoint("/undocumented", "GET", "oas3")]
+    index, findings, ran = _evaluate(after, view_map)
+    snapshot.record(db, index, findings, ["all"], ran)
+
+    history = snapshot.history(db)
+
+    assert [c.path for c in history.resolved] == ["/undocumented"]
+    assert history.not_compared == []
+
+
+def _evaluate(endpoints, view_map):
+    """Index, findings, and the rules that actually ran -- as the CLI does."""
+    from alibi.rules import RuleSet
+
+    ruleset = RuleSet.load()
+    index = build(endpoints, view_map)
+    views = {v for entry in index.entries.values() for v in entry.views}
+    findings, skipped = ruleset.evaluate(index, views)
+    held_back = {item.rule_id for item in skipped}
+    ran = [r["id"] for r in ruleset.rules if r["id"] not in held_back]
+    return index, findings, ran

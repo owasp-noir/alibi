@@ -31,6 +31,8 @@ def render(history: History, severities: list[str], stream=None) -> None:
     out(f"  {paint(history.current_at, 'bold')}"
         + paint(f"  compared against  {history.previous_at}", "dim"))
 
+    _render_not_compared(history, paint, out)
+
     if not history.new and not history.resolved:
         out()
         out("  " + paint("No finding appeared or disappeared since the "
@@ -90,3 +92,21 @@ def _by_severity(changes: list[Change], severities: list[str]) -> list[Change]:
         return (position, change.path, change.method, change.rule_id)
 
     return sorted(changes, key=rank)
+
+
+def _render_not_compared(history: History, paint, out) -> None:
+    """Rules the earlier scan ran and this one did not.
+
+    This is the trap the whole comparison had to be built around. Point alibi
+    at the code and forget the contracts, and SHADOW evaluates nothing -- which
+    looks, to a naive difference, exactly like every shadow API having been
+    closed. Those findings are held out of both lists and named here instead.
+    """
+    if not history.not_compared:
+        return
+    out()
+    out(paint("NOT COMPARED", "high"))
+    out(paint("  These ran in the previous scan and not in this one, so their "
+              "findings are\n  neither new nor resolved -- nobody looked. "
+              "Check the sources you passed.", "dim"))
+    out(paint(f"  {', '.join(history.not_compared)}", "dim"))
