@@ -30,9 +30,16 @@ jobs:
           # than none, because the badge still passes.
           uv pip install --group dev
 
+      # Lint once, not once per Python version: ruff's findings do not depend
+      # on the interpreter running the tests.
+      - name: Lint
+        if: matrix.python == '3.13'
+        run: .venv/bin/python -m ruff check .
+
       # Most of the suite runs without noir; the end-to-end tests skip
-      # themselves when it is absent, which is why it is not installed here.
-      # A scheduled job against a real noir build belongs in a separate
-      # workflow, so a missing release never blocks a pull request.
+      # themselves when it is absent, which is why it is not installed here,
+      # so a missing release never blocks a pull request. The integration
+      # against a real noir build runs in noir.yml, where a failure means
+      # "noir moved" rather than "this pull request is bad".
       - name: Test
         run: .venv/bin/python -m pytest tests/ -q

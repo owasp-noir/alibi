@@ -93,7 +93,7 @@ class RuleSet:
         self.suppressions: list[dict] = data.get("suppress", [])
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "RuleSet":
+    def load(cls, path: Path | None = None) -> RuleSet:
         source = path or _RULES_FILE
         with source.open(encoding="utf-8") as handle:
             return cls(yaml.safe_load(handle))
@@ -106,7 +106,8 @@ class RuleSet:
         moved = max(0, min(len(self.severities) - 1, position + steps))
         return self.severities[moved]
 
-    def evaluate(self, index: Index, present_views: set[str]) -> tuple[list[Finding], list[Skipped]]:
+    def evaluate(self, index: Index,
+                 present_views: set[str]) -> tuple[list[Finding], list[Skipped]]:
         findings: list[Finding] = []
         skipped: list[Skipped] = []
         runnable = []

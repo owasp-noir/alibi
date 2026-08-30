@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 from ..index import GRADE_LONE, Index
-from ..scope import Hint, TestHint, from_tests, suggest
 from ..rules import Finding, RuleSet, Skipped
+from ..scope import Hint, TestHint, from_tests, suggest
 
 # How many findings of one kind to print before saying how many are left.
 GROUP_LIMIT = 12
@@ -53,7 +53,8 @@ def render(
     stream=sys.stdout,
 ) -> None:
     paint = Painter(_use_color(stream))
-    out = lambda line="": print(line, file=stream)
+    def out(line=""):
+        print(line, file=stream)
 
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
@@ -330,8 +331,8 @@ def _render_scope_hint(hint: Hint | None, paint: Painter, out) -> None:
     out(paint("  If that is a separate surface the contract never covered, "
               "narrow the scan:", "dim"))
     out(paint(f"    alibi scan <paths> --ignore '{hint.ignore_pattern}'", "dim"))
-    out(paint(f"  If it is the same surface left undocumented, they are the "
-              f"findings that matter most.", "dim"))
+    out(paint("  If it is the same surface left undocumented, they are the "
+              "findings that matter most.", "dim"))
 
 
 def _render_test_hint(hint: TestHint | None, paint: Painter, out) -> None:

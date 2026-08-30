@@ -47,7 +47,7 @@ class IgnoreList:
     source: str = ""
 
     @classmethod
-    def load(cls, path: str | Path) -> "IgnoreList":
+    def load(cls, path: str | Path) -> IgnoreList:
         source = Path(path)
         with source.open(encoding="utf-8") as handle:
             data = yaml.safe_load(handle) or {}
@@ -55,7 +55,7 @@ class IgnoreList:
                    source=str(source))
 
     @classmethod
-    def discover(cls, search_paths: list[str]) -> "IgnoreList":
+    def discover(cls, search_paths: list[str]) -> IgnoreList:
         """Find a project's own suppressions without being told where."""
         candidates = [Path(p) for p in search_paths] + [Path.cwd()]
         for base in candidates:
@@ -67,13 +67,13 @@ class IgnoreList:
         return cls()
 
     @classmethod
-    def from_patterns(cls, patterns: list[str]) -> "IgnoreList":
+    def from_patterns(cls, patterns: list[str]) -> IgnoreList:
         return cls(entries=[
             IgnoreEntry(path=re.compile(p), why="given on the command line")
             for p in patterns
         ], source="--ignore")
 
-    def extend(self, other: "IgnoreList") -> "IgnoreList":
+    def extend(self, other: IgnoreList) -> IgnoreList:
         return IgnoreList(entries=self.entries + other.entries,
                           source=self.source or other.source)
 

@@ -1,5 +1,3 @@
-import pytest
-
 from alibi.ignore import IgnoreEntry, IgnoreList
 from alibi.index import build
 from alibi.rules import RuleSet

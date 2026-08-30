@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 from ..index import Index
-from ..scope import from_tests, suggest
 from ..rules import Finding, Skipped
+from ..scope import from_tests, suggest
 
 
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],

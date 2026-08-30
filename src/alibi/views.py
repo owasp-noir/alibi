@@ -47,7 +47,7 @@ class ViewMap:
                 self._techs[tech] = TechView(tech, spec)
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "ViewMap":
+    def load(cls, path: Path | None = None) -> ViewMap:
         source = path or _VIEWS_FILE
         with source.open(encoding="utf-8") as handle:
             return cls(yaml.safe_load(handle))

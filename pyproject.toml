@@ -40,8 +40,24 @@ packages = ["src/alibi"]
 # jsonschema holds the SARIF report to the published 2.1.0 schema. Nothing in
 # this repository reads SARIF, so without it a malformed document passes review
 # and is rejected on upload.
-dev = ["pytest>=8.0", "jsonschema>=4.0"]
+dev = ["pytest>=8.0", "jsonschema>=4.0", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+# The longest lines here are prose in docstrings and help text, where a
+# reflow costs more than it returns.
+line-length = 100
+target-version = "py311"
+# Fixtures are input for noir, not code this project ships. Ruff had already
+# deleted an unused import from a Flask fixture -- rewriting the very thing a
+# test asserts noir reads out of it.
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# E,F,W are the pyflakes/pycodestyle core; I sorts imports; UP keeps the
+# syntax at the 3.11 floor this package declares; B catches the bugs a linter
+# can actually see.
+select = ["E", "F", "W", "I", "UP", "B"]

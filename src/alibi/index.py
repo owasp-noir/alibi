@@ -14,8 +14,8 @@ near miss before it is allowed to become a finding.
 from __future__ import annotations
 
 from collections import defaultdict
-from pathlib import PurePosixPath
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 
 from .collect import RawEndpoint
 from .cover import Coverage
@@ -44,7 +44,7 @@ class Entry:
 
     key: Key
     observations: list[Observation] = field(default_factory=list)
-    near_misses: list["NearMiss"] = field(default_factory=list)
+    near_misses: list[NearMiss] = field(default_factory=list)
     # Other verbs answering on this same path, and which views know them.
     # Context, never doubt -- see `_find_siblings`.
     siblings: list[tuple[str, frozenset[str]]] = field(default_factory=list)
@@ -418,7 +418,7 @@ def _one_segment_apart(left: str, right: str) -> str | None:
     if len(lhs) != len(rhs):
         return None
 
-    differing = [i for i, (a, b) in enumerate(zip(lhs, rhs)) if a != b]
+    differing = [i for i, (a, b) in enumerate(zip(lhs, rhs, strict=True)) if a != b]
     if len(differing) != 1:
         return None
 

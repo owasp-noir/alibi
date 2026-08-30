@@ -1,4 +1,5 @@
 import pytest
+
 from alibi.collect import RawEndpoint
 from alibi.index import build
 from alibi.rules import RuleSet

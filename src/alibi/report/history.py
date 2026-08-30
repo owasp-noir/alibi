@@ -11,7 +11,8 @@ from .text import Painter, _use_color
 def render(history: History, severities: list[str], stream=None) -> None:
     stream = stream or sys.stdout
     paint = Painter(_use_color(stream))
-    out = lambda line="": print(line, file=stream)
+    def out(line=""):
+        print(line, file=stream)
 
     out()
     out(paint("alibi history", "bold") + paint(

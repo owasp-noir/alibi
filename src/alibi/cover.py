@@ -121,7 +121,7 @@ class Coverage:
         self._rules = rules
 
     @classmethod
-    def from_entries(cls, entries, view: str) -> "Coverage":
+    def from_entries(cls, entries, view: str) -> Coverage:
         rules = [
             Rule(key=entry.key, view=view, prefix=True)
             for entry in entries
