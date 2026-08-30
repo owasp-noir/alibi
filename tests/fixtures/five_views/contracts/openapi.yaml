@@ -1,0 +1,9 @@
+openapi: 3.0.0
+info: { title: Five views fixture, version: "1.0" }
+paths:
+  /api/users/{userId}:
+    get: { responses: { "200": { description: ok } } }
+  /api/users/{userId}/avatar:
+    post: { responses: { "200": { description: ok } } }
+  /api/legacy-export:
+    get: { responses: { "200": { description: ok } } }
