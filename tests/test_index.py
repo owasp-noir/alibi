@@ -132,3 +132,18 @@ def test_root_is_never_read_as_a_mount(endpoint, view_map):
     index = build(endpoints, view_map)
     root = index.entries[next(k for k in index.entries if k.path == "/")]
     assert not any("mount" in nm.reason for nm in root.near_misses)
+
+
+def test_coverage_is_not_reported_when_there_is_no_web_surface(endpoint, view_map):
+    """"0 of 0" answers nothing and reads as a broken gauge."""
+    from alibi.collect import RawEndpoint
+
+    index = build(
+        [
+            endpoint("/api", "ANY", "nginx"),
+            RawEndpoint(url="cli://tool/run", method="CLI", technology="go_cli",
+                        source="t", protocol="cli"),
+        ],
+        view_map,
+    )
+    assert index.coverage_stats() == {}

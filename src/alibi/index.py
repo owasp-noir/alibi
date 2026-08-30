@@ -145,6 +145,11 @@ class Index:
         reported and the reader decides.
         """
         targets = [key for key in self.keys_in(target) if key.http]
+        if not targets:
+            # "0 of 0" answers nothing. With no web surface to reach, how much
+            # of it a gateway reaches is not a number worth printing.
+            return {}
+
         stats: dict[str, tuple[int, int, int]] = {}
         for view, coverage in self.coverages.items():
             if not len(coverage):
