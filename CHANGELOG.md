@@ -6,6 +6,49 @@ Notable changes to alibi. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `.well-known` is a literal path segment, not a parameter. The regex-meta
+  heuristic required a leading word character to recognise a filename, so
+  every path under `/.well-known/` keyed as `/{}/...` -- colliding with any
+  real `/{tenant}/...` and merging two endpoints into one.
+- A format suffix keeps the resource name in front of it. `reports.{format}`
+  leaves the literal `reports.`, which failed the same heuristic from the
+  other end, so `/v2/reports.{format}`, `/v2/exports.{format}` and `/v2/{id}`
+  were one endpoint.
+- A spanning parameter meeting a single-segment one is a near miss. A
+  specification cannot spell "and everything below this", so Flask's
+  `<path:subpath>` and OpenAPI's `{subpath}` never met -- and one documented
+  upload route was reported as a critical shadow API and a phantom contract at
+  once.
+- Code and contract paths are shown relative to the source that was scanned,
+  matching what SARIF already emits. In the conflated-contracts block this was
+  more than cosmetic: two directories of one tree printed as two unrelated
+  ones, which is the reading that block exists to let you rule out.
+- `REVIEW` lists doubt about the findings that were printed. It was built from
+  the index, so it named entries that produced no finding, and printed in full
+  the path of a finding the project had suppressed.
+- The scope hint's `--ignore` suppresses exactly what its count named. The old
+  pattern also removed the endpoint at the prefix itself, which the count
+  treats as inside -- and which in the gRPC-gateway shape this hint appears in
+  is the mount point.
+- `alibi history` says when the two scans it compared were not given the same
+  paths. Every rule can run in both and the comparison still be meaningless:
+  two projects in one snapshot database reported each other's findings as
+  progress.
+- Two sources sharing a basename are two sources. `services/billing` and
+  `services/search` merged into one bucket, and the per-source table printed
+  two identical rows each claiming the other's endpoints.
+- A suppression list that cannot be read is reported rather than raised: a
+  malformed `--ignore` regex, invalid YAML, an `.alibi.yml` that is not a
+  mapping, and a missing `--ignore-file` all reached the user as tracebacks.
+  The list is now also read before noir runs, so a mistyped pattern does not
+  cost a scan.
+- The reason noir skipped a file survives into the report. The message was
+  trimmed from the front, which on real absolute paths spent the whole budget
+  on one path and dropped `file too large (12.35MB > 10.0MB)` -- the one fact
+  explaining why a view is missing.
+
 ## [0.1.0] - 2026-08-30
 
 First release. Runs [noir](https://github.com/owasp-noir/noir) once per view,
