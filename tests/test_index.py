@@ -322,7 +322,7 @@ def test_two_contracts_claiming_one_path_are_reported(endpoint, view_map):
     conflated = index.conflated()
 
     assert len(conflated) == 1
-    key, directories = conflated[0]
+    key, directories, _root = conflated[0]
     assert str(key) == "GET /health"
     assert directories == [
         "services/billing/contracts", "services/search/contracts"]

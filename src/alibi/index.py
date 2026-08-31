@@ -201,17 +201,25 @@ class Index:
         another documents leaves a single contract behind it, and no signal
         here.
         """
-        found: list[tuple[Key, list[str]]] = []
+        found: list[tuple[Key, list[str], str]] = []
         for entry in self.entries.values():
-            directories = {
-                str(PurePosixPath(code_path["path"]).parent)
+            documents = [
+                (code_path["path"], observation.raw.source_root)
                 for observation in entry.observations
                 if observation.view == "doc"
                 for code_path in observation.raw.code_paths
                 if code_path.get("path")
-            }
-            if len(directories) > 1:
-                found.append((entry.key, sorted(directories)))
+            ]
+            directories = {str(PurePosixPath(path).parent) for path, _ in documents}
+            if len(directories) < 2:
+                continue
+            # The root travels with them so a report can show these as one
+            # tree. Shortened apart, `<root>/rpc/flipt` and
+            # `<root>/rpc/flipt/auth` print as two unrelated directories --
+            # which is the alarming reading, and here the wrong one.
+            roots = {root for _, root in documents if root}
+            found.append((entry.key, sorted(directories),
+                          roots.pop() if len(roots) == 1 else ""))
         return found
 
     def coverage_stats(self, target: str = "code") -> dict[str, tuple[int, int, int]]:

@@ -47,7 +47,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
         ),
         "conflated": [
             {"endpoint": str(key), "contract_directories": directories}
-            for key, directories in index.conflated()
+            for key, directories, _ in index.conflated()
         ],
         "findings": [_finding(f) for f in findings],
         "skipped_rules": [

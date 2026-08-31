@@ -129,6 +129,48 @@ def test_a_long_path_does_not_push_the_reason_out_of_the_report(endpoint, view_m
     assert "spec-8.json" not in trimmed
 
 
+def test_locations_are_relative_to_the_source_the_user_named(endpoint, view_map):
+    """`routers/router.go` is what the repository calls the file.
+
+    Shortening to the last three path components instead produced a tail with
+    a machine-specific segment on the front, and disagreed with the path SARIF
+    emits for the same finding.
+    """
+    root = "/home/someone/checkouts/casdoor"
+    endpoints = [
+        endpoint("/api/only-in-code", "GET", "go_beego", source_root=root,
+                 code_paths=({"path": f"{root}/routers/router.go", "line": 87},)),
+        endpoint("/api/anchor", "GET", "go_beego", source_root=root,
+                 code_paths=({"path": f"{root}/routers/router.go", "line": 4},)),
+        endpoint("/api/anchor", "GET", "oas3", source_root=root,
+                 code_paths=({"path": f"{root}/swagger/swagger.json"},)),
+    ]
+
+    report = render(endpoints, view_map)
+    assert "routers/router.go:87" in report
+    assert "casdoor/routers/router.go" not in report
+
+
+def test_nested_contract_directories_print_as_one_tree(endpoint, view_map):
+    """The block asks whether two contracts are separate services.
+
+    Shortened apart, `<root>/rpc/flipt` and `<root>/rpc/flipt/auth` printed as
+    `flipt/rpc/flipt` and `rpc/flipt/auth` -- two unrelated directories, which
+    is the alarming reading and here the wrong one.
+    """
+    root = "/home/someone/checkouts/flipt"
+    endpoints = [
+        endpoint("/auth/v1/self", "GET", "oas3", source_root=root,
+                 code_paths=({"path": f"{root}/rpc/flipt/flipt.swagger.json"},)),
+        endpoint("/auth/v1/self", "GET", "oas3", source_root=root,
+                 code_paths=({"path": f"{root}/rpc/flipt/auth/auth.swagger.json"},)),
+    ]
+
+    report = render(endpoints, view_map)
+    assert "      rpc/flipt\n" in report
+    assert "      rpc/flipt/auth\n" in report
+
+
 def test_an_empty_scan_says_so_rather_than_describing_the_machinery(view_map):
     """The likeliest first run of all: the wrong directory.
 

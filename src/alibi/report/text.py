@@ -258,27 +258,34 @@ def _first_location(finding: Finding) -> str:
         if not path:
             continue
         line = path_info.get("line")
-        shortened = _shorten(str(path))
+        shortened = _shorten(str(path), str(path_info.get("source_root") or ""))
         return f"{shortened}:{line}" if line else shortened
     return ", ".join(sorted(finding.entry.techs))
 
 
-def _shorten(path: str) -> str:
+def _shorten(path: str, root: str = "") -> str:
     """Show a location the reader can act on.
 
     Noir echoes back whatever base path it was given, so scanning an absolute
     directory yields absolute code paths that push the useful part of the line
-    off the terminal. Relative to the working directory is what a reader can
-    paste into an editor.
-    """
-    try:
-        return str(Path(path).relative_to(Path.cwd()))
-    except ValueError:
-        pass
+    off the terminal.
 
-    # Outside the working directory: keep the tail, which is what distinguishes
-    # one service's contracts from another's, rather than the machine-specific
-    # head that does not.
+    Relative to the source the user named is the best answer, and the one
+    SARIF already gives: `routers/router.go` is what the repository calls the
+    file. The working directory is the fallback, for a noir path that does not
+    sit under any root alibi knows about.
+    """
+    for base in (root, str(Path.cwd())):
+        if not base:
+            continue
+        try:
+            return str(Path(path).relative_to(Path(base)))
+        except ValueError:
+            continue
+
+    # Under neither: keep the tail, which is what distinguishes one service's
+    # contracts from another's, rather than the machine-specific head that
+    # does not.
     parts = Path(path).parts
     return str(Path(*parts[-3:])) if len(parts) > 3 else path
 
@@ -307,10 +314,10 @@ def _render_conflated(index: Index, paint: Painter, out) -> None:
               "  If it is one API described by an aggregate document beside its "
               "per-package\n  sources, which is the ordinary shape of a "
               "gRPC-gateway project, this is nothing.", "dim"))
-    for key, directories in conflated[:5]:
+    for key, directories, root in conflated[:5]:
         out(paint(f"    {key}", "dim"))
         for directory in directories:
-            out(paint(f"      {_shorten(directory)}", "dim"))
+            out(paint(f"      {_shorten(directory, root)}", "dim"))
     if len(conflated) > 5:
         out(paint(f"    ... and {len(conflated) - 5} more (-f json)", "dim"))
 
