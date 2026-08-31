@@ -217,3 +217,44 @@ def test_without_a_separator_nothing_is_passed_through():
     from alibi.cli import split_passthrough
 
     assert split_passthrough(["scan", "."]) == (["scan", "."], [])
+
+
+def test_review_names_only_the_findings_that_were_printed(endpoint, view_map):
+    """The heading says "a reason to distrust a finding above". It has to be one.
+
+    Read off the index, this block listed every entry carrying a near miss --
+    including entries that produced no finding, so the reader was sent to
+    check a row that was not in the report, and including entries whose
+    finding the project had suppressed, so a path somebody asked not to hear
+    about was printed in full ten lines below the count of what was withheld.
+    """
+    from alibi.ignore import IgnoreList
+
+    ruleset = RuleSet.load()
+    endpoints = [
+        # A near-miss pair the project suppresses.
+        endpoint("/internal/admin/<int:uid>", "GET", "python_flask"),
+        endpoint("/internal/admin/42", "GET", "oas3"),
+        # And an ordinary finding, so the report does not end early.
+        endpoint("/public/undocumented", "GET", "python_flask"),
+        endpoint("/public/anchor", "GET", "python_flask"),
+        endpoint("/public/anchor", "GET", "oas3"),
+    ]
+    index = build(endpoints, view_map)
+    views = {v for entry in index.entries.values() for v in entry.views}
+    findings, skipped = ruleset.evaluate(index, views)
+
+    kept, suppressed = IgnoreList.from_patterns([r"^/internal/"]).apply(findings)
+    stream = io.StringIO()
+    text.render(index, kept, skipped, ruleset, ["fixture"], (), suppressed, stream)
+    report = stream.getvalue()
+
+    assert "/public/undocumented" in report
+    assert "2 findings suppressed" in report
+    assert "/internal/admin" not in report
+    assert "REVIEW" not in report
+
+    # Unsuppressed, the same doubt is still reported against its finding.
+    stream = io.StringIO()
+    text.render(index, findings, skipped, ruleset, ["fixture"], (), (), stream)
+    assert "REVIEW" in stream.getvalue()

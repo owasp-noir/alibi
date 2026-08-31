@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from ..index import GRADE_LONE, Index
+from ..index import Entry, Index
 from ..rules import Finding, RuleSet, Skipped
 from ..scope import Hint, TestHint, from_tests, suggest
 
@@ -178,7 +178,7 @@ def render(
 
     _render_scope_hint(suggest(index, findings, rules), paint, out)
     _render_test_hint(from_tests(findings, index), paint, out)
-    _render_near_misses(index, paint, out)
+    _render_near_misses(findings, paint, out)
     _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)
     out()
@@ -357,8 +357,23 @@ def _render_test_hint(hint: TestHint | None, paint: Painter, out) -> None:
     out(paint(f"    alibi scan <paths> -- {globs}", "dim"))
 
 
-def _render_near_misses(index: Index, paint: Painter, out) -> None:
-    flagged = [e for e in index.entries.values() if e.near_misses and e.grade == GRADE_LONE]
+def _render_near_misses(findings: list[Finding], paint: Painter, out) -> None:
+    """Doubt about the findings that were printed, and only those.
+
+    Read off the index instead, this listed every entry carrying a near miss:
+    ones that produced no finding at all, so "distrust a finding above" named
+    nothing above; and ones whose finding the project had suppressed, which
+    printed the path of an endpoint somebody had asked not to hear about.
+    Suppression counts what it withholds -- it must not withhold it here and
+    spell it out ten lines down.
+
+    Whole-scan doubt is still reported: the near-miss count beside the totals
+    is the tool's error bar over everything it compared, findings or not.
+    """
+    flagged: list[Entry] = []
+    for finding in findings:
+        if finding.uncertain and finding.entry not in flagged:
+            flagged.append(finding.entry)
     if not flagged:
         return
     out()
