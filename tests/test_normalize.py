@@ -77,6 +77,25 @@ def test_a_leading_dot_does_not_make_a_segment_a_parameter():
     assert normalize("/a/\\.git").key.path == "/a/{}"
 
 
+def test_a_format_suffix_keeps_the_name_in_front_of_it():
+    """`reports.{format}` is a resource with an extension, not a wildcard.
+
+    The literal left once the placeholder is punched out is `reports.`, and a
+    trailing dot failed the filename test -- so the whole segment became a
+    parameter and `/v2/reports.{format}`, `/v2/exports.{format}` and
+    `/v2/{id}` were one endpoint.
+    """
+    assert normalize("/v2/reports.{format}").key.path == "/v2/reports.{}"
+    assert (normalize("/v2/reports.{format}").key
+            != normalize("/v2/exports.{format}").key)
+    assert normalize("/v2/reports.{format}").key != normalize("/v2/{id}").key
+    # A placeholder on the other side of the dot was already right.
+    assert normalize("/users/{id}.json").key.path == "/users/{}.json"
+    assert normalize("/users/{id}.json").key != normalize("/users/{id}.xml").key
+    # A segment that is only dots names nothing.
+    assert normalize("/a/..").key.path == "/a/{}"
+
+
 def test_trailing_slash_does_not_split_one_endpoint_in_two():
     assert normalize("/api/v1/").key == normalize("/api/v1").key
     assert normalize("/").key.path == "/"

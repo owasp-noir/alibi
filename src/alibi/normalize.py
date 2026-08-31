@@ -253,13 +253,17 @@ def _looks_like_filename(literal: str) -> bool:
     paths, so a segment whose only metacharacter is a dot separating normal
     runs is treated as a literal rather than a pattern.
 
-    The leading dot is allowed because the most standardized literal segment on
-    the web starts with one. `/.well-known/jwks` was being read as a pattern and
-    keyed as `/{}/jwks`, which is both wrong about the path and collides with
-    every real `/{tenant}/jwks` -- a merge, and merges hide findings.
+    A dot on either end is allowed, because either end may be where something
+    else used to be. `/.well-known/jwks` starts with one and is the most
+    standardized literal segment on the web; `reports.{format}` ends with one
+    once the placeholder is punched out, and that suffix is how both OpenAPI
+    and Rails spell a format extension. Read as patterns, the first keyed as
+    `/{}/jwks` and the second as `/{}` -- so `/v2/reports.{format}`,
+    `/v2/exports.{format}` and `/v2/{id}` were one endpoint. Merges hide
+    findings, which is the direction that cannot be checked from the report.
     """
     if _REGEX_META.sub("", literal) == literal.replace(".", ""):
-        return bool(re.fullmatch(r"\.?[\w%-]+(\.[\w%-]+)*", literal))
+        return bool(re.fullmatch(r"\.?[\w%-]+(\.[\w%-]+)*\.?", literal))
     return False
 
 
