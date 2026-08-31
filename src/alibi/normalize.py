@@ -247,14 +247,19 @@ def _canon_segment(seg: str, names: list[str]) -> tuple[str, bool]:
 
 
 def _looks_like_filename(literal: str) -> bool:
-    """Distinguish `index.html` from `.*`.
+    """Distinguish `index.html` and `.well-known` from `.*`.
 
     A dot is the one regex metacharacter that shows up constantly in ordinary
-    paths, so a segment whose only metacharacter is a dot between two normal
-    runs is treated as a literal filename rather than a pattern.
+    paths, so a segment whose only metacharacter is a dot separating normal
+    runs is treated as a literal rather than a pattern.
+
+    The leading dot is allowed because the most standardized literal segment on
+    the web starts with one. `/.well-known/jwks` was being read as a pattern and
+    keyed as `/{}/jwks`, which is both wrong about the path and collides with
+    every real `/{tenant}/jwks` -- a merge, and merges hide findings.
     """
     if _REGEX_META.sub("", literal) == literal.replace(".", ""):
-        return bool(re.fullmatch(r"[\w%-]+(\.[\w%-]+)+", literal))
+        return bool(re.fullmatch(r"\.?[\w%-]+(\.[\w%-]+)*", literal))
     return False
 
 

@@ -62,6 +62,21 @@ def test_filenames_survive_the_regex_heuristic():
     assert normalize("/admin/.*").key.path == "/admin/*"
 
 
+def test_a_leading_dot_does_not_make_a_segment_a_parameter():
+    """`.well-known` is a literal, and the most standardized one there is.
+
+    Read as a pattern it keyed as `/{}/jwks`, which collides with every real
+    `/{tenant}/jwks` -- and a collision merges two endpoints into one, which
+    hides findings rather than inventing them.
+    """
+    assert normalize("/.well-known/jwks").key.path == "/.well-known/jwks"
+    assert (normalize("/.well-known/{application}/openid-configuration").key.path
+            == "/.well-known/{}/openid-configuration")
+    assert normalize("/.well-known/jwks").key != normalize("/{tenant}/jwks").key
+    # An escaped dot is regex however ordinary the rest of it looks.
+    assert normalize("/a/\\.git").key.path == "/a/{}"
+
+
 def test_trailing_slash_does_not_split_one_endpoint_in_two():
     assert normalize("/api/v1/").key == normalize("/api/v1").key
     assert normalize("/").key.path == "/"
