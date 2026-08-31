@@ -85,7 +85,7 @@ SHADOW  Shadow API -- Implemented, but no contract describes it
 TWO SURFACES?
   The doc view is 97% under /api, and 37 of these findings are outside it.
   If that is a separate surface the contract never covered, narrow the scan:
-    alibi scan <paths> --ignore '^/(?!api/)'
+    alibi scan <paths> --ignore '^/(?!api(/|$))'
   If it is the same surface left undocumented, they are the findings that matter most.
 ```
 
@@ -272,7 +272,7 @@ useless observation that a web UI is not in an API specification. Scoped to the
 surface the contract describes, it collapses to what was actually worth saying:
 
 ```console
-$ alibi scan ./netbox --ignore '^/(?!api/)'
+$ alibi scan ./netbox --ignore '^/(?!api(/|$))'
 ```
 → 3 shadow APIs: `/api/plugins`, `/api/schema/redoc`, `/api/schema/swagger-ui`,
 all three genuinely served and genuinely absent from the schema. The 397

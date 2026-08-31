@@ -59,7 +59,16 @@ class Hint:
 
     @property
     def ignore_pattern(self) -> str:
-        return f"^/(?!{self.prefix.lstrip('/')}/)"
+        """The command that suppresses exactly what `outside` counted.
+
+        `(/|$)` rather than a bare `/`, so the prefix path itself survives.
+        The measurement treats an endpoint at `/api` as inside the surface the
+        contract describes; `^/(?!api/)` suppressed it, so the report said
+        "37 findings are outside it" and handed over a command that removed
+        38. The one it disagreed about is the mount point -- the endpoint most
+        worth keeping in the gRPC-gateway shape this hint appears in.
+        """
+        return f"^/(?!{self.prefix.lstrip('/')}(/|$))"
 
     @property
     def share(self) -> int:

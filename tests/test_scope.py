@@ -29,7 +29,7 @@ def test_a_contract_scoped_to_one_prefix_is_reported_as_such(endpoint, view_map)
     assert hint.prefix == "/api"
     assert hint.share == 100
     assert hint.outside == 15
-    assert hint.ignore_pattern == "^/(?!api/)"
+    assert hint.ignore_pattern == "^/(?!api(/|$))"
 
 
 def test_no_hint_when_the_contract_is_spread_across_the_surface(endpoint, view_map):
@@ -150,3 +150,33 @@ def test_a_handful_of_test_findings_is_not_worth_a_paragraph(endpoint, view_map)
 
     index, findings, _ = scan(endpoints, view_map)
     assert from_tests(findings, index) is None
+
+
+def test_the_suggested_command_suppresses_exactly_what_was_counted(endpoint, view_map):
+    """The report prints a number and a command. They have to agree.
+
+    `^/(?!api/)` also suppressed the endpoint at `/api` itself, which the
+    count treats as inside the surface the contract describes -- so the report
+    said "12 findings are outside it" and handed over a command that removed
+    13. The one they disagreed about is the mount point, which in the
+    gRPC-gateway shape this hint appears in is the endpoint most worth
+    keeping.
+    """
+    from alibi.ignore import IgnoreList
+
+    endpoints = [endpoint(f"/api/thing{i}", "GET", "oas3") for i in range(20)]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(20)]
+    endpoints += [endpoint(f"/api/shadow{i}", "GET", "python_flask") for i in range(5)]
+    endpoints += [endpoint(f"/ui/page{i}", "GET", "python_flask") for i in range(12)]
+    endpoints += [endpoint("/api", "GET", "python_flask"),
+                  endpoint("/apifoo", "GET", "python_flask")]
+
+    index, findings, ruleset = scan(endpoints, view_map)
+    hint = suggest(index, findings, ruleset)
+    kept, dropped = IgnoreList.from_patterns([hint.ignore_pattern]).apply(findings)
+
+    assert (hint.inside, hint.outside) == (len(kept), len(dropped))
+    assert "/api" in {f.key.path for f in kept}
+    # A different top-level segment that merely starts with the same letters
+    # is still outside.
+    assert "/apifoo" in {f.key.path for f, _ in dropped}
