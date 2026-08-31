@@ -437,4 +437,15 @@ def _one_segment_apart(left: str, right: str) -> str | None:
         return f"segment {i} is a parameter here, the literal {b!r} there"
     if b in placeholders and a not in placeholders:
         return f"segment {i} is the literal {a!r} here, a parameter there"
+    if {a, b} == placeholders:
+        # One side swallows the rest of the path and the other takes a single
+        # segment. That is not two endpoints -- it is the same slot read at two
+        # granularities, which is what happens every time a framework's
+        # spanning converter meets a specification that has no way to spell
+        # one. Flask's `<path:subpath>` against OpenAPI's `{subpath}` reported
+        # a critical shadow API and a phantom contract for a route that both
+        # views described.
+        wide, narrow = ("here", "there") if a == "*" else ("there", "here")
+        return (f"segment {i} takes the rest of the path {wide} and a single "
+                f"segment {narrow}")
     return None

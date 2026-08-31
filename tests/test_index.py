@@ -57,6 +57,46 @@ def test_a_missing_parameter_is_reported_as_a_near_miss(endpoint, view_map):
     assert "parameter" in captured.near_misses[0].reason
 
 
+def test_a_spanning_parameter_meeting_a_single_segment_one_is_a_near_miss(
+    endpoint, view_map
+):
+    """The same slot read at two granularities is not two endpoints.
+
+    A specification has no way to spell "and everything below this", so a
+    framework's spanning converter always meets a plain `{param}` on the other
+    side. Flask's `<path:subpath>` against OpenAPI's `{subpath}` reported a
+    critical shadow API *and* a phantom contract for a route both views
+    described, with nothing said about why they failed to meet.
+    """
+    index = build(
+        [
+            endpoint("/api/files/<path:subpath>", "PUT", "python_flask"),
+            endpoint("/api/files/{subpath}", "PUT", "oas3"),
+        ],
+        view_map,
+    )
+
+    assert len(index.entries) == 2
+    assert index.near_miss_count == 2
+    wide = index.entries[next(k for k in index.entries if k.path.endswith("*"))]
+    assert "takes the rest of the path here" in wide.near_misses[0].reason
+
+
+def test_two_single_segment_parameters_in_one_place_are_the_same_endpoint(
+    endpoint, view_map
+):
+    """The guard above must not turn agreement into doubt."""
+    index = build(
+        [
+            endpoint("/api/files/{a}", "PUT", "python_flask"),
+            endpoint("/api/files/{b}", "PUT", "oas3"),
+        ],
+        view_map,
+    )
+    assert len(index.entries) == 1
+    assert index.near_miss_count == 0
+
+
 def test_same_path_different_verb_is_context_not_doubt(endpoint, view_map):
     """A verb difference cannot be a matching failure.
 
