@@ -171,3 +171,25 @@ def test_a_binary_that_will_not_report_a_version_is_not_refused(tmp_path):
 
 def test_a_version_check_that_cannot_run_is_not_refused(tmp_path):
     assert collect.noir_version(str(tmp_path / "does-not-exist")) is None
+
+
+def test_two_sources_with_one_basename_are_still_two_sources():
+    """`services/billing` and `services/search` are both `service`.
+
+    The per-source table exists to tell the reader which path came back
+    empty. Sharing a name, the two collapsed into one bucket and printed as
+    two identical rows each claiming the other's endpoints -- which answers
+    the opposite of the question.
+    """
+    from alibi.collect import sources
+
+    built = sources(["services/billing/service", "services/search/service"])
+    assert [s.name for s in built] == ["services/billing/service",
+                                       "services/search/service"]
+    # The root is still what the user typed, whichever name was chosen.
+    assert [s.root for s in built] == ["services/billing/service",
+                                       "services/search/service"]
+
+    # A basename of its own is still the name -- it is what fits in a column.
+    plain = sources(["./app", "./contracts"])
+    assert [s.name for s in plain] == ["app", "contracts"]

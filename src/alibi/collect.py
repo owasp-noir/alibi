@@ -130,6 +130,28 @@ class RawEndpoint:
     raw: dict = field(default_factory=dict)
 
 
+def sources(paths: list[str]) -> list[Source]:
+    """One Source per path the user named, each with a name of its own.
+
+    The name is the basename, because that is what fits in a report column.
+    But a monorepo laid out the usual way gives `services/billing` and
+    `services/search` the same one, and the per-source table then prints two
+    rows reading `service` that each claim the other's endpoints -- the exact
+    opposite of what the table is for, which is telling the reader which path
+    came back empty.
+
+    A basename shared by more than one path falls back to the path as typed.
+    """
+    built = [Source(path=path) for path in paths]
+    taken: dict[str, int] = {}
+    for source in built:
+        taken[source.name] = taken.get(source.name, 0) + 1
+    for source, path in zip(built, paths, strict=True):
+        if taken[source.name] > 1:
+            source.name = path
+    return built
+
+
 @contextmanager
 def scannable(source: Source):
     """Hand noir a directory, whichever kind of path was named.

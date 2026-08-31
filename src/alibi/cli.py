@@ -126,8 +126,7 @@ def _scan(args) -> int:
     endpoints = []
     errors = []
     names = []
-    for path in args.paths:
-        source = collect.Source(path=path)
+    for source in collect.sources(args.paths):
         names.append(source.name)
         with collect.scannable(source) as ready:
             result = collect.scan_views(ready, noir_bin, techs_by_view,
