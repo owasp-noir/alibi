@@ -35,6 +35,7 @@ def render(history: History, severities: list[str], stream=None) -> None:
         + paint(f"   compared against   scan {history.previous_scan}", "dim")
         + paint(f"  {history.previous_at}", "dim"))
 
+    _render_different_sources(history, paint, out)
     _render_not_compared(history, paint, out)
 
     if not history.new and not history.resolved:
@@ -96,6 +97,32 @@ def _by_severity(changes: list[Change], severities: list[str]) -> list[Change]:
         return (position, change.path, change.method, change.rule_id)
 
     return sorted(changes, key=rank)
+
+
+def _render_different_sources(history: History, paint, out) -> None:
+    """The two scans were not of the same thing.
+
+    `not_compared` catches a rule that stopped running. It does not catch the
+    case where every rule ran in both scans and the scans were of different
+    projects -- one snapshot database used for two, or a CI job whose paths
+    changed. Then each project's findings are reported as the other's
+    progress, which is the same overclaim in a form the rule check cannot see.
+
+    Both lists below are still printed. Sources changing is not always a
+    mistake -- adding a contracts directory to a scan is exactly how a
+    comparison is meant to grow -- so this says what changed and leaves the
+    reading to whoever knows why.
+    """
+    if not history.sources_differ:
+        return
+    out()
+    out(paint("DIFFERENT SOURCES", "high"))
+    out(paint("  These two scans were not given the same paths, so what "
+              "follows is not\n  one project changing over time.", "dim"))
+    out(paint(f"  scan {history.previous_scan}: "
+              f"{', '.join(history.sources_then) or '(none recorded)'}", "dim"))
+    out(paint(f"  scan {history.current_scan}: "
+              f"{', '.join(history.sources_now) or '(none recorded)'}", "dim"))
 
 
 def _render_not_compared(history: History, paint, out) -> None:

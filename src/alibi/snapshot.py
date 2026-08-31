@@ -152,6 +152,14 @@ class History:
     # which -- which is every run in CI, and every run while iterating.
     current_scan: int = 0
     previous_scan: int | None = None
+    # The paths the two scans were given, when they are not the same paths.
+    # Then neither list below is about one project changing over time.
+    sources_then: list[str] = dataclass_field(default_factory=list)
+    sources_now: list[str] = dataclass_field(default_factory=list)
+
+    @property
+    def sources_differ(self) -> bool:
+        return bool(self.sources_then or self.sources_now)
 
 
 def record(db_path: Path | str, index: Index, findings: list[Finding],
@@ -206,13 +214,13 @@ def history(db_path: Path | str) -> History:
     path = _existing(db_path)
     with _open(path) as conn:
         scans = conn.execute(
-            "SELECT id, at FROM scan ORDER BY id DESC LIMIT 2"
+            "SELECT id, at, sources FROM scan ORDER BY id DESC LIMIT 2"
         ).fetchall()
         if not scans:
             raise SnapshotError(f"{path} holds no scans yet.")
 
         total = int(conn.execute("SELECT count(*) FROM scan").fetchone()[0])
-        current_id, current_at = scans[0]
+        current_id, current_at, current_sources = scans[0]
 
         # One scan is a baseline, not a comparison. Reporting all of its
         # findings as "new" would be the same overclaim the rules refuse to
@@ -222,7 +230,16 @@ def history(db_path: Path | str) -> History:
                            previous_at=None, new=[], resolved=[],
                            current_scan=total)
 
-        previous_id, previous_at = scans[1]
+        previous_id, previous_at, previous_sources = scans[1]
+
+        # Every rule can run in both scans and the comparison still be
+        # meaningless, if the two scans were not of the same thing. One
+        # snapshot database holding two projects reports each one's findings
+        # as the other's progress -- 134 resolved, because scan 2 was a
+        # different repository. The sources are recorded; this is what for.
+        then = _sources(previous_sources)
+        now = _sources(current_sources)
+        moved = set(then) != set(now)
 
         # A rule that ran before and not now compared nothing this time, so
         # its findings did not disappear -- nobody looked. Reporting them as
@@ -243,7 +260,19 @@ def history(db_path: Path | str) -> History:
             new=_difference(conn, current_id, previous_id, comparable),
             resolved=_difference(conn, previous_id, current_id, comparable),
             not_compared=stopped,
+            sources_then=then if moved else [],
+            sources_now=now if moved else [],
         )
+
+
+def _sources(recorded: str) -> list[str]:
+    """The paths a scan was given. A row written by a future version may not
+    hold a list, and a header that cannot be read is not worth an exception."""
+    try:
+        found = json.loads(recorded)
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in found] if isinstance(found, list) else []
 
 
 def _ran(conn, scan_id: int) -> set[str] | None:

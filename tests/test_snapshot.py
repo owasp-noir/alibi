@@ -370,6 +370,64 @@ def test_a_rule_running_in_both_scans_still_resolves_normally(
     assert history.not_compared == []
 
 
+def test_two_projects_in_one_database_are_not_each_other_s_progress(
+    tmp_path, endpoint, view_map
+):
+    """Every rule can run in both scans and the comparison still mean nothing.
+
+    `not_compared` only sees a rule that stopped running. Point a second
+    project at the same snapshot database and every rule runs both times --
+    so the first project's findings are reported as the second's resolved
+    work, with nothing said. The sources were already recorded; this reads
+    them.
+    """
+    db = tmp_path / "snapshots.db"
+
+    billing = [
+        endpoint("/billing/charge", "GET", "python_flask"),
+        endpoint("/billing/anchor", "GET", "python_flask"),
+        endpoint("/billing/anchor", "GET", "oas3"),
+    ]
+    index, findings, ran = _evaluate(billing, view_map)
+    snapshot.record(db, index, findings, ["billing"], ran, when=DAY1)
+
+    search = [
+        endpoint("/search/query", "GET", "python_flask"),
+        endpoint("/search/anchor", "GET", "python_flask"),
+        endpoint("/search/anchor", "GET", "oas3"),
+    ]
+    index, findings, ran = _evaluate(search, view_map)
+    snapshot.record(db, index, findings, ["search"], ran, when=DAY2)
+
+    history = snapshot.history(db)
+
+    # The difference is still computed -- saying what changed is not the same
+    # as claiming it is progress -- but it no longer stands unqualified.
+    assert [c.path for c in history.resolved] == ["/billing/charge"]
+    assert history.not_compared == []
+    assert history.sources_differ
+    assert history.sources_then == ["billing"]
+    assert history.sources_now == ["search"]
+
+
+def test_the_same_sources_twice_says_nothing_about_sources(
+    tmp_path, endpoint, view_map
+):
+    """The guard must not fire on the ordinary case, which is every scan."""
+    db = tmp_path / "snapshots.db"
+    same = [endpoint("/thing", "GET", "python_flask"),
+            endpoint("/thing", "GET", "oas3")]
+
+    for when in (DAY1, DAY2):
+        index, findings, ran = _evaluate(same, view_map)
+        # Order is not identity: two paths named the other way round are the
+        # same scan.
+        paths = ["code", "contracts"] if when == DAY1 else ["contracts", "code"]
+        snapshot.record(db, index, findings, paths, ran, when=when)
+
+    assert not snapshot.history(db).sources_differ
+
+
 def _evaluate(endpoints, view_map):
     """Index, findings, and the rules that actually ran -- as the CLI does."""
     from alibi.rules import RuleSet
