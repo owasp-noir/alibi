@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from . import __version__, collect, snapshot
-from .ignore import IgnoreList
+from .ignore import IgnoreError, IgnoreList
 from .index import build as build_index
 from .report import history as history_report
 from .report import json_report, sarif, text
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "history":
             return _history(args)
     except (collect.NoirNotFound, collect.NoirFailed, collect.NoirTooOld,
-            snapshot.SnapshotError) as exc:
+            snapshot.SnapshotError, IgnoreError) as exc:
         print(f"alibi: {exc}", file=sys.stderr)
         return EXIT_ERROR
     return EXIT_ERROR
@@ -107,6 +107,14 @@ def main(argv: list[str] | None = None) -> int:
 def _scan(args) -> int:
     view_map = ViewMap.load(args.views)
     rules = RuleSet.load(args.rules)
+
+    # Before noir runs, not after. A mistyped `--ignore` pattern is an
+    # ordinary thing to do, and finding out about it should not cost the scan
+    # -- which on a large repository is the only expensive part of this.
+    ignores = (IgnoreList.load(args.ignore_file) if args.ignore_file
+               else IgnoreList.discover(args.paths))
+    ignores = ignores.extend(IgnoreList.from_patterns(args.ignore))
+
     noir_bin = collect.find_noir(args.noir_bin)
     collect.require_version(noir_bin)
 
@@ -131,9 +139,6 @@ def _scan(args) -> int:
     present_views = {view for entry in index.entries.values() for view in entry.views}
     findings, skipped = rules.evaluate(index, present_views)
 
-    ignores = (IgnoreList.load(args.ignore_file) if args.ignore_file
-               else IgnoreList.discover(args.paths))
-    ignores = ignores.extend(IgnoreList.from_patterns(args.ignore))
     findings, suppressed = ignores.apply(findings)
 
     if args.format == "json":

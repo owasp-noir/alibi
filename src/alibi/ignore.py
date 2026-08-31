@@ -22,6 +22,15 @@ import yaml
 CONFIG_NAMES = (".alibi.yml", ".alibi.yaml")
 
 
+class IgnoreError(RuntimeError):
+    """A suppression list that cannot be read. Reported, never raised at the user.
+
+    Every input here is hand-written -- a regex on the command line, a YAML
+    file in the repository -- so getting one wrong is ordinary, and a
+    traceback is the wrong way to say `[` is missing its `]`.
+    """
+
+
 @dataclass
 class IgnoreEntry:
     path: re.Pattern[str] | None = None
@@ -49,9 +58,23 @@ class IgnoreList:
     @classmethod
     def load(cls, path: str | Path) -> IgnoreList:
         source = Path(path)
-        with source.open(encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-        return cls(entries=[_entry(item) for item in (data.get("ignore") or [])],
+        try:
+            with source.open(encoding="utf-8") as handle:
+                data = yaml.safe_load(handle) or {}
+        except OSError as exc:
+            raise IgnoreError(f"cannot read {source}: {exc.strerror or exc}") from exc
+        except yaml.YAMLError as exc:
+            raise IgnoreError(f"{source} is not valid YAML: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise IgnoreError(
+                f"{source} should be a mapping with an `ignore:` list, "
+                f"not {type(data).__name__}")
+        listed = data.get("ignore") or []
+        if not isinstance(listed, list):
+            raise IgnoreError(f"`ignore:` in {source} should be a list, "
+                              f"not {type(listed).__name__}")
+        return cls(entries=[_entry(item, source) for item in listed],
                    source=str(source))
 
     @classmethod
@@ -69,7 +92,7 @@ class IgnoreList:
     @classmethod
     def from_patterns(cls, patterns: list[str]) -> IgnoreList:
         return cls(entries=[
-            IgnoreEntry(path=re.compile(p), why="given on the command line")
+            IgnoreEntry(path=_pattern(p, "--ignore"), why="given on the command line")
             for p in patterns
         ], source="--ignore")
 
@@ -98,11 +121,23 @@ class IgnoreList:
         return kept, dropped
 
 
-def _entry(item: dict) -> IgnoreEntry:
+def _entry(item, source) -> IgnoreEntry:
+    if not isinstance(item, dict):
+        raise IgnoreError(f"every entry under `ignore:` in {source} should be a "
+                          f"mapping with a path, rule or view -- found "
+                          f"{type(item).__name__}")
     pattern = item.get("path")
     return IgnoreEntry(
-        path=re.compile(pattern) if pattern else None,
+        path=_pattern(pattern, source) if pattern else None,
         rule=item.get("rule"),
         view=item.get("view"),
         why=item.get("why", ""),
     )
+
+
+def _pattern(pattern, source) -> re.Pattern[str]:
+    try:
+        return re.compile(pattern)
+    except (re.error, TypeError) as exc:
+        raise IgnoreError(f"{pattern!r} in {source} is not a valid regular "
+                          f"expression: {exc}") from exc
