@@ -97,6 +97,38 @@ def test_a_skip_that_cost_nothing_does_not_raise_the_alarm(endpoint, view_map):
     assert "NOIR COULD NOT READ EVERYTHING" in loud
 
 
+def test_a_long_path_does_not_push_the_reason_out_of_the_report(endpoint, view_map):
+    """The reason is the diagnostic; the path list is the expendable half.
+
+    Real paths are absolute and long. Trimming the message from the front spent
+    the whole budget on one path and dropped `file too large`, leaving a
+    warning that named a file and said nothing about it.
+    """
+    from alibi.collect import ScanError
+
+    endpoints = [endpoint("/thing", "GET", "python_flask"),
+                 endpoint("/anchor", "GET", "oas3")]
+    deep = "/" + "/".join(f"very-long-directory-name-{i}" for i in range(12))
+    lost = [ScanError(tech="detect",
+                      message=f"skipped 1 file: {deep}/openapi.json; first error: "
+                              f"file too large (12.35MB > 10.0MB)")]
+
+    report = render(endpoints, view_map, errors=lost)
+    assert "file too large (12.35MB > 10.0MB)" in report
+    # One path is not a list, so there is nothing to shorten and no half-path.
+    assert "full list in -f json" not in report
+
+    many = [ScanError(tech="detect",
+                      message=("skipped 9 files: "
+                               + ", ".join(f"{deep}/spec-{i}.json" for i in range(9))
+                               + "; first error: file too large (12.35MB > 10.0MB)"))]
+    trimmed = render(endpoints, view_map, errors=many)
+    assert "file too large (12.35MB > 10.0MB)" in trimmed
+    assert "full list in -f json" in trimmed
+    # Whatever survives of the list is whole paths, never half of one.
+    assert "spec-8.json" not in trimmed
+
+
 def test_an_empty_scan_says_so_rather_than_describing_the_machinery(view_map):
     """The likeliest first run of all: the wrong directory.
 

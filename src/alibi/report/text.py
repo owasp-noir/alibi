@@ -421,16 +421,24 @@ def _by_detail(items: list[Skipped]) -> list[tuple[str, list[str]]]:
 
 
 def _trim(message: str, limit: int = 160) -> str:
-    """Keep a skip report readable.
+    """Keep a skip report readable without cutting off what it explains.
 
-    Noir lists every path it skipped, which for a repository full of test
-    symlinks is a paragraph of absolute paths. The count and the first example
-    carry the meaning; the full list is in `-f json`.
+    Noir writes these as `skipped N files: <paths>; first error: <reason>`.
+    The path list is the expendable half -- for a repository full of test
+    symlinks it is a paragraph of absolute paths. The reason is the entire
+    diagnostic, and trimming from the front threw exactly that away: NetBox's
+    whole doc view goes missing behind `file too large (12.35MB > 10.0MB)`,
+    and what the report printed was two thirds of one absolute path.
+
+    So the reason is always kept and only the list is shortened, at a path
+    boundary. A single path is left whole -- there is no list to shorten, and
+    half a path names no file.
     """
-    if len(message) <= limit:
-        return message
-    head, _, _ = message[:limit].rpartition(", ")
-    return f"{head or message[:limit]} ... (full list in -f json)"
+    head, separator, reason = message.partition("; first error: ")
+    if len(head) > limit and ", " in head:
+        kept, _, _ = head[:limit].rpartition(", ")
+        head = f"{kept or head.split(', ')[0]} ... (full list in -f json)"
+    return f"{head}{separator}{reason}"
 
 
 def _wrap(text: str, width: int = 74, indent: str = "  ") -> str:
