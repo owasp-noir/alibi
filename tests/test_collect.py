@@ -137,6 +137,32 @@ def test_a_skip_that_cost_nothing_is_not_a_missing_view(tmp_path):
     assert media.consequential is False
 
 
+def test_a_loss_alibi_has_not_been_taught_about_still_reads_as_a_loss():
+    """Noir keeps adding kinds of loss; a watch-list cannot keep up with them.
+
+    noir 1.3.0 began reporting a specification document it could not parse and
+    an entry it could not stat -- between them a whole doc view and a whole
+    subtree. Neither carries any of the phrases the old watch-list matched, so
+    both were filed under "noir skipped media, binaries or symlinks": the
+    quietest possible rendering of the loudest possible loss.
+    """
+    unparsable = collect.ScanError(
+        tech="oas3",
+        message="skipped 1 unparsable document: api/openapi.json; "
+                "first error: unexpected token '<EOF>' at line 2, column 1")
+    unstattable = collect.ScanError(
+        tech="detect",
+        message="skipped 3 unreadable entries: gen/a/b/c; first error: "
+                "Error getting file info for 'gen/a/b/c': File name too long")
+    undelivered = collect.ScanError(
+        tech="deliver",
+        message="webhook delivery to http://x failed: connection refused")
+
+    assert unparsable.consequential is True
+    assert unstattable.consequential is True
+    assert undelivered.consequential is True
+
+
 def versioned_noir(tmp_path, output, name="versioned-noir"):
     """A stand-in that answers `--version` with a prepared line."""
     script = tmp_path / name

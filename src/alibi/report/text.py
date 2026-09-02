@@ -66,16 +66,31 @@ def render(
         f"  ·  {len(sources)} source{'s' if len(sources) != 1 else ''}"
         f"  ·  {len(index.entries)} endpoints", "dim"))
     if not index.entries:
-        # By far the likeliest first run: the wrong directory. Saying "no rule
-        # had the views it needs" here describes the machinery rather than the
-        # situation, and leaves the reader looking for a flag they are missing.
+        # An empty scan is the one place the errors matter most, and the one
+        # place this used to return before printing them. A directory holding
+        # a single OpenAPI document noir could not parse rendered as "point
+        # alibi at a directory holding some of those" -- advice to go look
+        # elsewhere, for a scan whose only source noir had just said it could
+        # not read.
+        lost = _render_errors(errors, paint, out, views_follow=False)
         out()
-        out("  " + paint("Noir found no endpoints here.", "medium"))
-        out(paint("  It reads code in 33 languages, OpenAPI and other API "
-                  "contracts, captured\n  traffic, gateway config and "
-                  "infrastructure declarations. Point alibi at\n  a directory "
-                  "holding some of those, or run `noir -b <path>` to see what "
-                  "it finds.", "dim"))
+        if lost:
+            out("  " + paint("Noir found no endpoints, and it did not read "
+                             "everything.", "medium"))
+            out(paint("  Settle what is listed above before reading this as "
+                      "\"no API here\":\n  a view noir could not read is "
+                      "missing, not empty.", "dim"))
+        else:
+            # By far the likeliest first run: the wrong directory. Saying "no
+            # rule had the views it needs" here describes the machinery rather
+            # than the situation, and leaves the reader looking for a flag
+            # they are missing.
+            out("  " + paint("Noir found no endpoints here.", "medium"))
+            out(paint("  It reads code in 33 languages, OpenAPI and other API "
+                      "contracts, captured\n  traffic, gateway config and "
+                      "infrastructure declarations. Point alibi at\n  a directory "
+                      "holding some of those, or run `noir -b <path>` to see what "
+                      "it finds.", "dim"))
         out()
         return
 
@@ -100,25 +115,7 @@ def render(
     # Anything noir could not read goes above the findings, because it changes
     # what the findings mean. A specification skipped for being too large reads
     # downstream as "this project documents nothing".
-    lost = [e for e in errors if e.consequential]
-    declined = [e for e in errors if not e.consequential]
-
-    if lost:
-        out()
-        out(paint("NOIR COULD NOT READ EVERYTHING", "high"))
-        out(paint("  Views below may be incomplete, and a missing view is not "
-                  "the same as an empty one.", "dim"))
-        for error in lost:
-            out(paint(f"  [{error.tech}] {_wrap(_trim(error.message), indent='    ')}", "dim"))
-
-    if declined:
-        # Images, binaries and symlinks noir passed over on purpose. Worth
-        # recording, not worth alarming about -- an alarm for these teaches the
-        # reader to skip the one above.
-        out()
-        out(paint(f"  {len(declined)} note{'s' if len(declined) != 1 else ''}: "
-                  f"noir skipped media, binaries or symlinks (details in -f json)",
-                  "dim"))
+    _render_errors(errors, paint, out)
 
     # The near-miss count is the tool's own error bar. It belongs next to the
     # totals, not buried under the findings, because every finding below is
@@ -182,6 +179,43 @@ def render(
     _render_suppressed(suppressed, paint, out)
     _render_skipped(skipped, paint, out)
     out()
+
+
+def _render_errors(errors: list, paint: Painter, out,
+                   views_follow: bool = True) -> list:
+    """What noir could not read, and how much of it matters.
+
+    Returns the consequential errors, because both callers have to say
+    something different when the list is not empty: the full report warns that
+    the views below may be incomplete, and the empty-scan path has to stop
+    itself telling the reader to go look in another directory.
+
+    `views_follow` is false on that empty path, where there is no view below
+    to be incomplete and the caller says the same thing in the terms that do
+    apply there.
+    """
+    lost = [e for e in errors if e.consequential]
+    declined = [e for e in errors if not e.consequential]
+
+    if lost:
+        out()
+        out(paint("NOIR COULD NOT READ EVERYTHING", "high"))
+        if views_follow:
+            out(paint("  Views below may be incomplete, and a missing view is "
+                      "not the same as an empty one.", "dim"))
+        for error in lost:
+            out(paint(f"  [{error.tech}] {_wrap(_trim(error.message), indent='    ')}", "dim"))
+
+    if declined:
+        # Images, binaries and symlinks noir passed over on purpose. Worth
+        # recording, not worth alarming about -- an alarm for these teaches the
+        # reader to skip the one above.
+        out()
+        out(paint(f"  {len(declined)} note{'s' if len(declined) != 1 else ''}: "
+                  f"noir skipped media, binaries or symlinks (details in -f json)",
+                  "dim"))
+
+    return lost
 
 
 def _render_sources(index: Index, sources: list[str], paint: Painter, out) -> None:

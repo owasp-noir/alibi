@@ -258,3 +258,33 @@ def test_review_names_only_the_findings_that_were_printed(endpoint, view_map):
     stream = io.StringIO()
     text.render(index, findings, skipped, ruleset, ["fixture"], (), (), stream)
     assert "REVIEW" in stream.getvalue()
+
+
+def test_an_empty_scan_says_what_noir_could_not_read(view_map):
+    """The empty scan is where the errors matter most, and where they were lost.
+
+    A directory holding one OpenAPI document noir could not parse rendered as
+    "Point alibi at a directory holding some of those" -- advice to go look
+    somewhere else, for a scan whose only source noir had just said it could
+    not read. The report returned before it printed a single error.
+    """
+    from alibi.collect import ScanError
+
+    lost = [ScanError(tech="oas3",
+                      message="skipped 1 unparsable document: api/openapi.json; "
+                              "first error: unexpected token '<EOF>'")]
+
+    report = render([], view_map, errors=lost)
+    assert "NOIR COULD NOT READ EVERYTHING" in report
+    assert "api/openapi.json" in report
+    assert "and it did not read everything" in report
+    # The "wrong directory" advice is wrong here: the directory held a source.
+    assert "Point alibi at" not in report
+
+
+def test_an_empty_scan_with_nothing_lost_still_says_where_to_look(view_map):
+    """The likeliest empty scan is still the wrong directory."""
+    report = render([], view_map)
+    assert "Noir found no endpoints here." in report
+    assert "Point alibi at" in report
+    assert "NOIR COULD NOT READ EVERYTHING" not in report

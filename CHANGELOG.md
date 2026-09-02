@@ -8,6 +8,17 @@ Notable changes to alibi. The format follows
 
 ### Fixed
 
+- An empty scan says what noir could not read. The report returned before it
+  printed a single error, so a directory holding one OpenAPI document noir
+  could not parse rendered as `Point alibi at a directory holding some of
+  those` -- advice to go look elsewhere, for a scan whose only source noir had
+  just said it could not read.
+- A loss alibi has not been taught about reads as a loss. `consequential`
+  matched a watch-list of alarming phrases, so noir 1.3.0's two new kinds --
+  an unparsable specification document, an entry it could not stat, between
+  them a whole doc view and a whole subtree -- both landed under `noir skipped
+  media, binaries or symlinks`. It is an allow-list of the benign reasons now,
+  so a reason alibi does not recognise fails loud.
 - `.well-known` is a literal path segment, not a parameter. The regex-meta
   heuristic required a leading word character to recognise a filename, so
   every path under `/.well-known/` keyed as `/{}/...` -- colliding with any

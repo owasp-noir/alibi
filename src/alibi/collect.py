@@ -89,22 +89,40 @@ class ScanError:
     message: str
     source: str = ""
 
+    # Reasons noir gives for passing over something *on purpose*. A symlink
+    # whose target the walk already covered, a file whose bytes are binary,
+    # an image: none of those was ever going to yield an endpoint, and
+    # alarming about them trains the reader to skip the section that matters.
+    #
+    # Noir's own wording, from the `first error:` half of the message it
+    # builds in `Noir::SkippedFiles`. It has been stable across releases, and
+    # a phrase that drifts fails safe here -- see `consequential`.
+    DECLINED_ON_PURPOSE = (
+        "symbolic link",
+        "not a regular file",
+        "binary content",
+        "media file",
+    )
+
     @property
     def consequential(self) -> bool:
         """Might this have cost the scan endpoints?
 
-        Noir skips files for two different kinds of reason and says which. A
-        document it could not read -- too large for its budget, or gone by the
-        time it looked -- may have held an entire view: NetBox's 308-path
-        specification was exactly that. A file it declined to read on purpose --
-        an image, a binary, a symlink whose target the walk already covered --
-        cost nothing, and raising the alarm for those trains the reader to skip
-        the section that matters.
+        An allow-list of the benign reasons, not a watch-list of the alarming
+        ones. That direction is the whole point: noir keeps growing the set of
+        losses it reports -- noir 1.3.0 added an unparsable specification
+        document and an entry it could not stat, which between them cover a
+        whole doc view and a whole subtree -- and a watch-list files every
+        loss it has not been taught about under "skipped media, binaries or
+        symlinks". Silence about a lost view is the one failure this class
+        exists to prevent, so an unrecognised reason has to read as a loss.
+
+        The cost of the inversion is a benign skip occasionally reported as a
+        loss, which is a line of noise. The cost of the other direction is
+        `0 endpoints` presented as a clean result.
         """
         message = self.message.lower()
-        return any(mark in message for mark in (
-            "too large", "permission", "removed during the scan",
-        ))
+        return not any(mark in message for mark in self.DECLINED_ON_PURPOSE)
 
 
 @dataclass
