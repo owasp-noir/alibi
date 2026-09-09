@@ -144,7 +144,13 @@ def render(
             out("  " + paint(
                 f"Nothing left to report -- {len(suppressed)} finding"
                 f"{'s' if len(suppressed) != 1 else ''} suppressed. See below.", "dim"))
-        elif any(s.reason == "no-overlap" for s in skipped):
+        elif any(s.reason in ("no-overlap", "not-selective") for s in skipped):
+            # Both reasons mean a comparison this scan should have made did
+            # not happen. minio holds 33 routes and one nginx `location /`;
+            # with UNEXPOSED held back for having no selective rule, the only
+            # rule left to run was DANGLING against that same catch-all,
+            # which is suppressed -- so "no disagreement" claimed an
+            # agreement nothing had checked.
             out("  " + paint("No findings -- but nothing was compared. See below.", "medium"))
         elif skipped and len(skipped) == len(rules.rules):
             out("  " + paint("No rule had the views it needs. See below.", "dim"))

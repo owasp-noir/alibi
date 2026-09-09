@@ -288,3 +288,39 @@ def test_an_empty_scan_with_nothing_lost_still_says_where_to_look(view_map):
     assert "Noir found no endpoints here." in report
     assert "Point alibi at" in report
     assert "NOIR COULD NOT READ EVERYTHING" not in report
+
+
+def test_a_scan_whose_only_rule_was_held_back_does_not_claim_agreement(
+    endpoint, view_map
+):
+    """minio: 33 Go routes and one nginx `location /`.
+
+    With UNEXPOSED held back for having no selective rule, the only rule left
+    with both its views was DANGLING, against that same catch-all -- which is
+    suppressed as the code's own fallback. Nothing was compared, and the
+    report said "No disagreement between the views in this scan", which is
+    the sentence this project already refuses to print when the comparison
+    did not run.
+    """
+    import io
+
+    from alibi.index import build
+    from alibi.report import text
+    from alibi.rules import RuleSet
+
+    endpoints = [endpoint("/", "ANY", "nginx")]
+    endpoints += [endpoint(f"/route{i}", "GET", "go_http") for i in range(20)]
+
+    ruleset = RuleSet.load()
+    index = build(endpoints, view_map)
+    views = {v for entry in index.entries.values() for v in entry.views}
+    findings, skipped = ruleset.evaluate(index, views)
+
+    assert findings == []
+    stream = io.StringIO()
+    text.render(index, findings, skipped, ruleset, ["minio"], stream=stream)
+    out = stream.getvalue()
+
+    assert "No disagreement" not in out
+    assert "nothing was compared" in out
+    assert "catch-all rule at /" in out
