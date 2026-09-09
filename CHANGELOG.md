@@ -17,6 +17,21 @@ Notable changes to alibi. The format follows
   held back as views that never met. flipt now corroborates 36 of 36 and
   Argo CD 38 of 106.
 
+### Added
+
+- When two views share no endpoint at all, the held-back diagnostic now says
+  whether they line up once a constant prefix comes off one side. Gitea's
+  generated specification declares `basePath: /GITEA-API-APP-SUBURL/api/v1`
+  and its Go router mounts `/api/v1`, which noir's reader drops, so the two
+  views share nothing: the report said "check whether one side is a mount
+  point", and now says that 154 of the 535 documented paths match a code
+  path once three leading segments are removed. That sentence names the
+  prefix and sends the reader to the two files that disagree.
+- A flood of findings that is really one subtree the other view lacks is
+  named as one. NodeBB's 354 phantom contracts include 207 paths under
+  `/api/v3`, where the code view holds nothing at all -- Express routers
+  mounted through a helper noir does not follow. One question, not 207.
+
 ### Fixed
 
 - `--views` and `--rules` crashed before noir ran: both loaders were written

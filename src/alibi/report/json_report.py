@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 from ..index import Index
-from ..rules import Finding, Skipped
-from ..scope import from_tests, suggest
+from ..rules import MAX_UNCORROBORATED_FINDINGS, Finding, Skipped
+from ..scope import from_tests, missing_subtree, suggest
 
 
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
@@ -40,6 +40,12 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             },
         },
         "scope_hint": _hint(suggest(index, findings, ruleset)),
+        "missing_subtree": (
+            {"rule": ms.rule_id, "prefix": ms.prefix, "findings": ms.findings,
+             "of": ms.total, "absent_view": ms.absent_view}
+            if (ms := missing_subtree(findings, index, ruleset,
+                                      MAX_UNCORROBORATED_FINDINGS)) else None
+        ),
         "test_hint": (
             {"findings": th.findings, "total": th.total,
              "directories": th.directories, "exclude": th.exclude_globs}

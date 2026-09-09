@@ -159,6 +159,18 @@ for the routes beneath it, or a stack noir could not read — so the rules are
 held back and the reason is printed instead. Paths that turn out to have many
 endpoints from other views beneath them are labelled as probable mounts.
 
+When the two views do line up once a constant prefix comes off one of them,
+the diagnostic says so and names the prefix. Gitea's generated specification
+declares `basePath: /GITEA-API-APP-SUBURL/api/v1` while its Go router mounts
+`/api/v1`; the views share nothing, but 154 of the 535 documented paths match
+a code path once those three segments are removed. That is a spec `basePath`,
+a `servers[].url`, or a mount the code reader dropped — and it is reported,
+never applied, because realigning the paths would hide the bug it found.
+
+A flood that is really one missing subtree is named as one: 207 of NodeBB's
+354 phantom contracts sit under `/api/v3`, where the code view holds nothing
+at all.
+
 **A missing view and an empty one mean opposite things.** Noir reports what it
 could not read, and alibi prints that above the findings. NetBox ships a 12.35MB
 OpenAPI document with 308 paths; noir skips it for exceeding its file-size cap,

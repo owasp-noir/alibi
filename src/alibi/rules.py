@@ -10,6 +10,7 @@ import yaml
 
 from .cover import Rule as CoverRule
 from .index import Entry, Index
+from .scope import realign
 
 _RULES_FILE = Path(__file__).with_name("rules.yml")
 
@@ -236,13 +237,31 @@ class RuleSet:
                 f"nothing and says which for no endpoint in particular.",
             )
 
-        return Skipped(
-            rule["id"], "no-overlap",
+        detail = (
             f"{left_size} {left} and {right_size} {right} endpoints, and not one "
             f"of them lines up -- the two views never met, so every endpoint "
-            f"would qualify. Check whether one side is a mount point standing "
-            f"in for the routes beneath it, or a stack noir could not read.",
-        )
+            f"would qualify. ")
+        shifted = realign(index, left, right, MAX_UNCORROBORATED_FINDINGS)
+        if shifted:
+            # The one thing this can compute that a reader cannot see: gitea's
+            # views share nothing until three segments come off the doc side,
+            # and then 154 of 535 line up. Said that way, the diagnostic names
+            # the prefix and the side, and the reader goes straight to the
+            # basePath or the dropped mount instead of to "check whether".
+            detail += (
+                f"But {shifted.aligned} of the {shifted.total} {shifted.view} "
+                f"paths under {shifted.prefix} match a {shifted.other} path "
+                f"once that prefix is removed. One side is carrying "
+                f"{shifted.segments} leading segment"
+                f"{'s' if shifted.segments != 1 else ''} the other is not -- "
+                f"a spec basePath or servers[].url, or a router mount the "
+                f"code reader dropped. Settle which is right, and this "
+                f"comparison is {shifted.aligned} endpoints wide.")
+        else:
+            detail += (
+                "Check whether one side is a mount point standing in for the "
+                "routes beneath it, or a stack noir could not read.")
+        return Skipped(rule["id"], "no-overlap", detail)
 
     def _connection(self, index: Index, left: str, right: str) -> int:
         """How much two views actually have to do with each other."""

@@ -211,3 +211,153 @@ def _load_bearing(index) -> set[str]:
 def applies(pattern: str, path: str) -> bool:
     """Used by the tests to confirm a suggested pattern does what it says."""
     return bool(re.search(pattern, path))
+
+
+# --- when two views part company along a prefix --------------------------------
+
+# Deepest constant prefix worth trying. A spec `basePath` is one to three
+# segments (`/api/v1`, `/GITEA-API-APP-SUBURL/api/v1`) and a router mount the
+# same; nothing measured needed more, and every extra depth is a chance for a
+# coincidence.
+MAX_PREFIX_SEGMENTS = 3
+
+_PLACEHOLDERS = ("{}", "*")
+
+
+def _segments(path: str) -> list[str]:
+    return [s for s in path.split("/") if s]
+
+
+def _constant(segments: list[str]) -> bool:
+    return all(s not in _PLACEHOLDERS for s in segments)
+
+
+@dataclass(frozen=True)
+class Realignment:
+    """A prefix one view carries that the other does not.
+
+    `aligned` of the `total` paths in `view` under `prefix` match a path in
+    `other` once the prefix is removed.
+    """
+
+    view: str
+    other: str
+    prefix: str
+    aligned: int
+    total: int
+
+    @property
+    def segments(self) -> int:
+        return len(_segments(self.prefix))
+
+
+def realign(index: Index, left: str, right: str, floor: int) -> Realignment | None:
+    """Do the two views line up once a constant prefix comes off one of them?
+
+    Gitea's generated OpenAPI declares `basePath: /GITEA-API-APP-SUBURL/api/v1`
+    and noir prefixes every path with it, faithfully; its Go router mounts
+    `/api/v1` and noir's reader drops that. The two views share nothing, and
+    the report said "check whether one side is a mount point" -- true, and no
+    help. What it can compute instead: 154 of the 535 documented paths match
+    a code path once their first three segments are removed. That sentence
+    names the prefix and points at the bug.
+
+    Only a constant prefix counts, and only a match with a literal segment
+    left in it: `/{}` stripped of a parameter matches every `/{}`, and says
+    nothing. `floor` is how many aligned paths it takes before this is a lead
+    rather than a coincidence -- the caller passes the flood size it already
+    reasons in. Measured, the repositories whose views are genuinely two
+    surfaces align 0 paths this way (authentik, Argo CD before its protos were
+    read as code); gitea aligns 154.
+
+    Reported, never applied. Realigning the paths would hide the bug it
+    found, and which side is wrong is not something a count can say.
+    """
+    best: Realignment | None = None
+    for view, other in ((left, right), (right, left)):
+        targets = {(k.method, k.path) for k in index.keys_in(other) if k.http}
+        mine = [k for k in index.keys_in(view) if k.http]
+        for depth in range(1, MAX_PREFIX_SEGMENTS + 1):
+            aligned: dict[str, int] = {}
+            total: dict[str, int] = {}
+            for key in mine:
+                parts = _segments(key.path)
+                if len(parts) <= depth or not _constant(parts[:depth]):
+                    continue
+                prefix = "/" + "/".join(parts[:depth])
+                total[prefix] = total.get(prefix, 0) + 1
+                rest = parts[depth:]
+                if all(s in _PLACEHOLDERS for s in rest):
+                    continue
+                if (key.method, "/" + "/".join(rest)) in targets:
+                    aligned[prefix] = aligned.get(prefix, 0) + 1
+            for prefix, count in aligned.items():
+                if count > floor and (best is None or count > best.aligned):
+                    best = Realignment(view, other, prefix, count, total[prefix])
+    return best
+
+
+@dataclass(frozen=True)
+class MissingSubtree:
+    """A prefix many of one rule's findings share, where the other view has nothing.
+
+    NodeBB documents 207 paths under `/api/v3` and noir reads none of the
+    Express routers mounted there, so the report listed 207 phantom
+    contracts. They are one missing subtree, not 207 removed routes.
+    """
+
+    rule_id: str
+    prefix: str
+    findings: int
+    total: int
+    absent_view: str
+
+
+def missing_subtree(findings: list, index: Index, ruleset, floor: int) -> MissingSubtree | None:
+    """Is a flood of one rule mostly a subtree the other view does not have at all?
+
+    For every rule that compares one view's presence against another's
+    absence and produced more than `floor` findings, the findings are grouped
+    by constant prefix, and a prefix under which the absent view holds no
+    path at all is a lead: whatever is under it was never read, or never
+    built, as a unit. The largest such group is reported, at the shortest
+    prefix that still isolates it.
+
+    A finding outside the scope hint's prefix is not counted. The hint has
+    already said those are a second surface the contract never covered, and
+    naming NetBox's `/dcim` as a subtree the specification lacks would be the
+    same observation with a worse explanation.
+    """
+    if ruleset is None or not findings:
+        return None
+    hint = suggest(index, findings, ruleset)
+    inside = f"{hint.prefix}/" if hint else None
+
+    best: MissingSubtree | None = None
+    for rule in ruleset.rules:
+        absent = rule.get("absent") or []
+        if len(absent) != 1:
+            continue
+        absent_view = absent[0]
+        mine = [f for f in findings if f.rule_id == rule["id"] and f.key.http]
+        if len(mine) <= floor:
+            continue
+        if inside:
+            mine = [f for f in mine if f.key.path.startswith(inside)]
+        there = [k.path for k in index.keys_in(absent_view) if k.http]
+
+        for depth in range(1, MAX_PREFIX_SEGMENTS + 1):
+            groups: dict[str, int] = {}
+            for finding in mine:
+                parts = _segments(finding.key.path)
+                if len(parts) <= depth or not _constant(parts[:depth]):
+                    continue
+                prefix = "/" + "/".join(parts[:depth])
+                groups[prefix] = groups.get(prefix, 0) + 1
+            for prefix, count in groups.items():
+                if count <= floor or (best is not None and count <= best.findings):
+                    continue
+                if any(p == prefix or p.startswith(prefix + "/") for p in there):
+                    continue
+                best = MissingSubtree(rule["id"], prefix, count, len(mine), absent_view)
+    return best
