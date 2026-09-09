@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from .collect import RawEndpoint
-from .cover import Coverage
+from .cover import Coverage, KeySet
 from .normalize import Key, Normalized, normalize
 from .views import TechView, ViewMap
 
@@ -122,6 +122,8 @@ class Index:
     # the answer is expensive: every code endpoint against every routing rule.
     _coverage_stats: dict[str, dict[str, tuple[int, int, int]]] = field(
         default_factory=dict, repr=False)
+    # Memo for `key_set`, on the same grounds.
+    _key_sets: dict[str, KeySet] = field(default_factory=dict, repr=False)
 
     def by_view(self, view: str) -> list[Entry]:
         return [e for e in self.entries.values() if view in e.views]
@@ -151,6 +153,18 @@ class Index:
     def keys_in(self, view: str) -> list[Key]:
         return [e.key for e in self.entries.values() if view in e.views]
 
+    def key_set(self, view: str) -> KeySet:
+        """The keys of a view, indexed for "does this rule reach any of them".
+
+        Asked once per gateway rule, and each answer used to cost a pass over
+        every code endpoint: every rule against every key. With the keys
+        indexed once per scan, a plain rule is a set lookup.
+        """
+        found = self._key_sets.get(view)
+        if found is None:
+            found = KeySet(self.keys_in(view))
+            self._key_sets[view] = found
+        return found
 
     def population(self, view: str) -> int:
         return sum(1 for e in self.entries.values() if view in e.views)
