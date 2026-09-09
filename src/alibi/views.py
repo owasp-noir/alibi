@@ -47,8 +47,10 @@ class ViewMap:
                 self._techs[tech] = TechView(tech, spec)
 
     @classmethod
-    def load(cls, path: Path | None = None) -> ViewMap:
-        source = path or _VIEWS_FILE
+    def load(cls, path: str | Path | None = None) -> ViewMap:
+        # `--views` arrives as a string, and a string has no `open`. Every
+        # run with an alternative map fell over on that before noir started.
+        source = Path(path) if path else _VIEWS_FILE
         with source.open(encoding="utf-8") as handle:
             return cls(yaml.safe_load(handle))
 

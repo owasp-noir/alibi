@@ -93,8 +93,9 @@ class RuleSet:
         self.suppressions: list[dict] = data.get("suppress", [])
 
     @classmethod
-    def load(cls, path: Path | None = None) -> RuleSet:
-        source = path or _RULES_FILE
+    def load(cls, path: str | Path | None = None) -> RuleSet:
+        # `--rules` arrives as a string; see `ViewMap.load`.
+        source = Path(path) if path else _RULES_FILE
         with source.open(encoding="utf-8") as handle:
             return cls(yaml.safe_load(handle))
 

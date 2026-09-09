@@ -463,3 +463,11 @@ def test_one_added_endpoint_does_not_switch_a_rule_off(endpoint, view_map):
     assert drift_ran(4) is True
     assert drift_ran(5) is True
     assert drift_ran(20) is True
+
+
+def test_an_alternative_ruleset_can_be_named_by_path_string(tmp_path):
+    """`--rules PATH` has the same shape as `--views PATH`, and had the same bug."""
+    alternative = tmp_path / "rules.yml"
+    alternative.write_text("rules: []\n", encoding="utf-8")
+
+    assert RuleSet.load(str(alternative)).rules == []
