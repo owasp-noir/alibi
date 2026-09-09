@@ -6,8 +6,21 @@ Notable changes to alibi. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `grpc` speaks for the code view. A .proto's `option (google.api.http)` is
+  what generates a gRPC-gateway's HTTP surface, and noir emits an HTTP route
+  from nothing else -- so the proto is where those routes are implemented,
+  and the OpenAPI document beside it was generated from it. Filed as doc, the
+  two corroborated each other and the Go code never entered the comparison:
+  flipt and Argo CD both reported 0 documented paths corroborated and were
+  held back as views that never met. flipt now corroborates 36 of 36 and
+  Argo CD 38 of 106.
+
 ### Fixed
 
+- `--views` and `--rules` crashed before noir ran: both loaders were written
+  for a `Path` and both flags hand them a string.
 - A gateway made of nothing but a catch-all holds `UNEXPOSED` back and says
   so. Casdoor's Helm chart declares one Ingress rule, at `/`; coverage
   already refused to count `location /` as reaching anything, but let it

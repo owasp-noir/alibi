@@ -61,3 +61,18 @@ def test_an_alternative_view_map_can_be_named_by_path_string(tmp_path):
 
     view_map = ViewMap.load(str(alternative))
     assert view_map.lookup("grpc").view == "code"
+
+
+def test_a_proto_with_http_annotations_is_implementation_not_contract():
+    """`grpc: code`, and why.
+
+    Noir's grpc analyzer emits an HTTP route from one thing only: an
+    `option (google.api.http)` annotation. That annotation is what a
+    gRPC-gateway generates its serving routes from, so the proto is where
+    the HTTP surface is implemented, and the OpenAPI document next to it is
+    generated from the proto. Filed as doc, the two corroborated each other
+    and the Go code never entered the comparison -- flipt reported 0 of 42
+    documented paths corroborated, Argo CD 0 of 106, and both were held back
+    as views that never met. Filed as code, flipt corroborates 36 of 36.
+    """
+    assert ViewMap.load().lookup("grpc").view == "code"

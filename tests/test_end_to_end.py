@@ -181,3 +181,46 @@ def test_the_corroborated_endpoints_raise_nothing():
     }
     assert len(flagged) == 1
     assert "looks like a mount" in next(iter(flagged.values()))
+
+
+GRPC_FIXTURE = Path(__file__).parent / "fixtures" / "grpc_gateway"
+
+
+@requires_noir
+def test_a_proto_with_http_annotations_corroborates_the_document_generated_from_it():
+    """The gRPC-gateway shape, and why `grpc` speaks for the code view.
+
+    The fixture is a .proto whose two rpcs carry `option (google.api.http)`,
+    one Flask route, and an OpenAPI document listing the two proto routes and
+    one more. Filed as doc, the proto and the document corroborated each
+    other and every route the Go or Python code did not hold read as a
+    phantom -- which on flipt and Argo CD was every documented route, and
+    both were held back as views that never met.
+
+    Run through the real pipeline rather than one noir call, because the
+    whole point is per-view scanning: in a single scan noir deduplicates the
+    proto's `/v1/flags/{key}` against the document's, and the corroboration
+    this test is about is exactly what that erases.
+    """
+    view_map = ViewMap.load()
+    catalog = collect.list_techs(_noir())
+    source = collect.Source(str(GRPC_FIXTURE))
+    result = collect.scan_views(source, _noir(), view_map.techs_by_view(catalog))
+    index = build(result.endpoints, view_map)
+    views = {v for entry in index.entries.values() for v in entry.views}
+    findings, skipped = RuleSet.load().evaluate(index, views)
+
+    assert views == {"code", "doc"}
+    assert not [s for s in skipped if s.rule_id in {"SHADOW", "PHANTOM"}]
+
+    corroborated = {str(e.key) for e in index.entries.values() if len(e.views) > 1}
+    assert corroborated == {"GET /v1/flags/{}", "POST /v1/flags"}
+    for entry in index.entries.values():
+        if len(entry.views) > 1:
+            assert entry.techs == {"grpc", "oas3"}
+
+    reported = {(f.rule_id, f.key.method, f.key.path) for f in findings}
+    assert reported == {
+        ("SHADOW", "GET", "/healthz"),
+        ("PHANTOM", "GET", "/v1/segments"),
+    }

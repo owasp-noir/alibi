@@ -292,7 +292,9 @@ The other three are held back, each for a reason worth knowing:
   same surface at two granularities.
 - **authentik** assembles its URLconf at runtime by importing every installed
   app's `urls` module, which no static reader can follow.
-- **flipt** mounts a gRPC gateway; its Go source holds one route.
+- **flipt** mounts a gRPC gateway; its Go source holds one route. Its HTTP
+  surface is implemented in `.proto` annotations, which is why `grpc` speaks
+  for the code view: filed there, 36 of its 36 documented paths corroborate.
 
 Which is this tool's ceiling, stated plainly: it compares what noir can read,
 and a view read at the wrong granularity is worse than one not read at all.
