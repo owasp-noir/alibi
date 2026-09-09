@@ -97,6 +97,11 @@ def main(argv: list[str] | None = None) -> int:
                            "A value starting with a dash needs the joined form, "
                            "--noir-arg=--exclude-path=..., or put it after a "
                            "bare -- instead")
+    scan.add_argument("--endpoints", action="store_true",
+                      help="with -f json, list what every view held. Large "
+                           "-- on a big repository several times the rest of "
+                           "the payload -- and the only way to see why two "
+                           "views did or did not line up")
     scan.add_argument("--ignore", action="append", default=[], metavar="REGEX",
                       help="suppress findings whose path matches (repeatable)")
     scan.add_argument("--ignore-file", metavar="FILE",
@@ -123,6 +128,15 @@ def main(argv: list[str] | None = None) -> int:
                   f"`{args.command}` does not run it", file=sys.stderr)
             return EXIT_ERROR
         args.noir_arg = list(args.noir_arg) + passthrough
+
+    # A flag that silently does nothing is worse than one that is refused:
+    # the reader waits for a scan, greps the output for the lists, and finds
+    # neither them nor any reason they are missing.
+    if getattr(args, "endpoints", False) and args.format != "json":
+        print(f"alibi: --endpoints adds the per-view endpoint lists to the "
+              f"JSON report, and -f {args.format} has nowhere to put them. "
+              f"Use -f json.", file=sys.stderr)
+        return EXIT_ERROR
 
     try:
         if args.command == "scan":
@@ -183,7 +197,7 @@ def _scan(args) -> int:
 
     if args.format == "json":
         print(report.dump(index, findings, skipped, names, errors,
-                          suppressed, rules))
+                          suppressed, rules, args.endpoints))
     elif args.format == "sarif":
         print(report.dump(index, findings, skipped, names, rules, errors,
                           suppressed))

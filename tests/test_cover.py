@@ -33,6 +33,45 @@ def test_root_is_not_treated_as_coverage():
     assert not rule.reaches(Key("GET", "/anything"))
 
 
+def test_a_catch_all_reaches_nothing_not_even_the_root():
+    """The one endpoint `/` used to reach was the code's own `/` fallback.
+
+    That single exact match was enough to count as the gateway and the code
+    having met, so the guard that holds a rule back when two views never
+    connect stood down -- and Casdoor's lone Ingress at `/` produced 365
+    findings saying nothing was exposed. `/*` is the same rule spelled as a
+    regex and used to reach everything; two spellings of one config gave
+    opposite answers.
+    """
+    for spelling, method in (("/", "GET"), ("/", "ANY"), ("/*", "ANY")):
+        rule = Rule(Key(method, spelling), "gateway", prefix=True)
+        assert not rule.reaches(Key("GET", "/"))
+        assert not rule.reaches(Key("GET", "/*"))
+        assert not rule.reaches(Key("GET", "/anything"))
+
+
+def test_coverage_keeps_catch_alls_out_of_its_rules_and_counts_them():
+    from alibi.cover import Coverage
+    from alibi.index import Entry, Observation
+    from alibi.normalize import normalize
+
+    def entry(path):
+        e = Entry(key=normalize(path, "ANY").key)
+        e.observations.append(Observation(normalize(path, "ANY"), None, "gateway", None))
+        return e
+
+    blanket = Coverage.from_entries([entry("/"), entry("/*")], "gateway")
+    assert len(blanket) == 0
+    assert blanket.catch_alls == 2
+    assert not blanket.selective
+
+    mixed = Coverage.from_entries([entry("/"), entry("/api")], "gateway")
+    assert len(mixed) == 1
+    assert mixed.selective
+    assert mixed.covers(Key("GET", "/api/users"))
+    assert not mixed.covers(Key("GET", "/debug"))
+
+
 def test_placeholders_match_concrete_segments_and_each_other():
     assert matches("/users/{}", "/users/123")
     assert matches("/users/{}", "/users/{}")

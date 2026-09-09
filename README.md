@@ -100,6 +100,21 @@ informative part, and `-f json` has all of it.
   with: { sarif_file: alibi.sarif }
 ```
 
+### Seeing what each view held
+
+The report says the views disagree; `--endpoints` says what each of them
+contained.
+
+```console
+$ alibi scan ./repo -f json --endpoints
+```
+
+Every view gets a list: the key, which views vouched for it, the technologies
+behind it, the files, and the spelling before normalization — which is where
+the difference always is when two rows should have matched and did not. It is
+three to four times the rest of the payload, so it is a flag rather than the
+default.
+
 Or gate directly: `alibi scan . ./contracts --fail-on high` exits non-zero when
 a finding reaches that severity. A scan noir could not read in full reports
 `executionSuccessful: false`, so a degraded run does not pass as a clean one.
@@ -159,6 +174,18 @@ for the routes beneath it, or a stack noir could not read — so the rules are
 held back and the reason is printed instead. Paths that turn out to have many
 endpoints from other views beneath them are labelled as probable mounts.
 
+When the two views do line up once a constant prefix comes off one of them,
+the diagnostic says so and names the prefix. Gitea's generated specification
+declares `basePath: /GITEA-API-APP-SUBURL/api/v1` while its Go router mounts
+`/api/v1`; the views share nothing, but 154 of the 535 documented paths match
+a code path once those three segments are removed. That is a spec `basePath`,
+a `servers[].url`, or a mount the code reader dropped — and it is reported,
+never applied, because realigning the paths would hide the bug it found.
+
+A flood that is really one missing subtree is named as one: 207 of NodeBB's
+354 phantom contracts sit under `/api/v3`, where the code view holds nothing
+at all.
+
 **A missing view and an empty one mean opposite things.** Noir reports what it
 could not read, and alibi prints that above the findings. NetBox ships a 12.35MB
 OpenAPI document with 308 paths; noir skips it for exceeding its file-size cap,
@@ -213,6 +240,13 @@ The report says how much of the code each routing view reaches, because whether
 "34 endpoints no gateway reaches" is real depends on whether that config is the
 one fronting the service. No threshold separates those honestly: Argo CD's e2e
 test fixture reaches 39% of its code and NetBox's real config reaches 100%.
+
+A catch-all — `location /`, an Ingress at `/`, a `RewriteRule ^(.*)$` — is not
+evidence either way. It routes everything or nothing, the same for every
+endpoint, so it counts as reaching none of them. A gateway view holding nothing
+else has no signal to offer, and `UNEXPOSED` sits out and says so rather than
+reporting every endpoint as unreachable. Casdoor's Helm chart is exactly that:
+one Ingress rule at `/`, which read as evidence produced 365 findings.
 
 ### Traffic has to have been watched
 
@@ -285,7 +319,9 @@ The other three are held back, each for a reason worth knowing:
   same surface at two granularities.
 - **authentik** assembles its URLconf at runtime by importing every installed
   app's `urls` module, which no static reader can follow.
-- **flipt** mounts a gRPC gateway; its Go source holds one route.
+- **flipt** mounts a gRPC gateway; its Go source holds one route. Its HTTP
+  surface is implemented in `.proto` annotations, which is why `grpc` speaks
+  for the code view: filed there, 36 of its 36 documented paths corroborate.
 
 Which is this tool's ceiling, stated plainly: it compares what noir can read,
 and a view read at the wrong granularity is worse than one not read at all.

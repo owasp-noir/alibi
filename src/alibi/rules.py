@@ -10,6 +10,7 @@ import yaml
 
 from .cover import Rule as CoverRule
 from .index import Entry, Index
+from .scope import realign
 
 _RULES_FILE = Path(__file__).with_name("rules.yml")
 
@@ -93,8 +94,9 @@ class RuleSet:
         self.suppressions: list[dict] = data.get("suppress", [])
 
     @classmethod
-    def load(cls, path: Path | None = None) -> RuleSet:
-        source = path or _RULES_FILE
+    def load(cls, path: str | Path | None = None) -> RuleSet:
+        # `--rules` arrives as a string; see `ViewMap.load`.
+        source = Path(path) if path else _RULES_FILE
         with source.open(encoding="utf-8") as handle:
             return cls(yaml.safe_load(handle))
 
@@ -132,6 +134,28 @@ class RuleSet:
                     f"the {', '.join(unwitnessed)} view holds only hand-written "
                     f"collections in this scan, and what nobody watched cannot "
                     f"show what is live or unused",
+                ))
+                continue
+
+            # The routing-view twin of `needs_observed`. A gateway made of
+            # nothing but `location /` routes everything or nothing, and
+            # either way the same for every endpoint -- so "no rule reaches
+            # this one" is not a finding, it is the shape of the config.
+            # Casdoor's Helm chart declares one Ingress at `/`, and read as
+            # evidence it produced 365 findings saying nothing was exposed.
+            blanket = [
+                view for view in rule.get("needs_selective", [])
+                if (coverage := index.coverages.get(view)) is not None
+                and not coverage.selective
+            ]
+            if blanket:
+                catch_alls = sum(index.coverages[v].catch_alls for v in blanket)
+                skipped.append(Skipped(
+                    rule["id"], "not-selective",
+                    f"the {', '.join(blanket)} view holds nothing but "
+                    f"{catch_alls} catch-all rule{'s' if catch_alls != 1 else ''} "
+                    f"at / in this scan, and a rule that routes everything or "
+                    f"nothing cannot say what it does not reach",
                 ))
                 continue
 
@@ -195,13 +219,49 @@ class RuleSet:
         if connection > 0:
             return None
 
-        return Skipped(
-            rule["id"], "no-overlap",
+        routing = [v for v in views if v in index.coverages]
+        if len(routing) == 1:
+            # One side is a routing config. It did not fail to share keys --
+            # it reached nothing, which is a statement about which service
+            # this config fronts. Superset's gateway view is its docs site's
+            # `.htaccess`: 37 rules, 0 of 277 Flask routes reached.
+            routes, other = routing[0], next(v for v in views if v != routing[0])
+            rules_count = len(index.coverages[routes])
+            return Skipped(
+                rule["id"], "no-overlap",
+                f"{rules_count} {routes} rule{'s' if rules_count != 1 else ''} "
+                f"and {index.population(other)} {other} endpoints, and not one "
+                f"rule reaches a single endpoint -- this routing config does "
+                f"not front this code, so every endpoint would qualify. A "
+                f"catch-all at / does not count: it routes everything or "
+                f"nothing and says which for no endpoint in particular.",
+            )
+
+        detail = (
             f"{left_size} {left} and {right_size} {right} endpoints, and not one "
             f"of them lines up -- the two views never met, so every endpoint "
-            f"would qualify. Check whether one side is a mount point standing "
-            f"in for the routes beneath it, or a stack noir could not read.",
-        )
+            f"would qualify. ")
+        shifted = realign(index, left, right, MAX_UNCORROBORATED_FINDINGS)
+        if shifted:
+            # The one thing this can compute that a reader cannot see: gitea's
+            # views share nothing until three segments come off the doc side,
+            # and then 154 of 535 line up. Said that way, the diagnostic names
+            # the prefix and the side, and the reader goes straight to the
+            # basePath or the dropped mount instead of to "check whether".
+            detail += (
+                f"But {shifted.aligned} of the {shifted.total} {shifted.view} "
+                f"paths under {shifted.prefix} match a {shifted.other} path "
+                f"once that prefix is removed. One side is carrying "
+                f"{shifted.segments} leading segment"
+                f"{'s' if shifted.segments != 1 else ''} the other is not -- "
+                f"a spec basePath or servers[].url, or a router mount the "
+                f"code reader dropped. Settle which is right, and this "
+                f"comparison is {shifted.aligned} endpoints wide.")
+        else:
+            detail += (
+                "Check whether one side is a mount point standing in for the "
+                "routes beneath it, or a stack noir could not read.")
+        return Skipped(rule["id"], "no-overlap", detail)
 
     def _connection(self, index: Index, left: str, right: str) -> int:
         """How much two views actually have to do with each other."""

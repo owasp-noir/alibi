@@ -371,6 +371,74 @@ def test_a_catch_all_handler_is_not_a_missing_endpoint(endpoint, view_map):
     assert [f for f in findings if f.rule_id == "UNEXPOSED"] == []
 
 
+def test_a_gateway_of_nothing_but_a_catch_all_holds_unexposed_back(endpoint, view_map):
+    """Casdoor's Helm chart declares one Ingress rule, at `/`.
+
+    That rule routes everything or nothing, the same for every endpoint, so
+    "no gateway rule reaches this" is not a finding about any one of them --
+    it is the shape of the config. Read as evidence it produced 365 findings,
+    each one already carrying the note that the routing config probably does
+    not front the code. The thin-coverage demotion is for a config that
+    reaches *little*; a config that can reach nothing in particular has no
+    signal to demote, and the rule sits out and says why.
+    """
+    endpoints = [endpoint("/", "GET", "k8s_ingress")]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "go_beego") for i in range(20)]
+    endpoints.append(endpoint("/", "GET", "go_beego"))
+
+    findings, skipped = evaluate(endpoints, view_map)
+
+    assert [f for f in findings if f.rule_id == "UNEXPOSED"] == []
+    assert reasons(skipped, "UNEXPOSED") == {"not-selective"}
+    detail = next(s.detail for s in skipped if s.rule_id == "UNEXPOSED")
+    assert "1 catch-all rule at /" in detail
+    # The catch-all is not a dangling route either: it is the code's fallback
+    # mirrored, and suppressed for the same reason.
+    assert [f for f in findings if f.rule_id == "DANGLING"] == []
+
+
+def test_a_catch_all_beside_a_real_rule_leaves_the_real_rule_to_decide(
+    endpoint, view_map
+):
+    """The single-page-app shape: `location /` serves files, `location /api/`
+    proxies. The catch-all says nothing; the prefix rule is the evidence, and
+    the route it does not reach is exactly the one worth asking about."""
+    endpoints = [endpoint("/", "ANY", "nginx"), endpoint("/api", "ANY", "nginx")]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(4)]
+    endpoints.append(endpoint("/debug/pprof", "GET", "python_flask"))
+
+    findings, skipped = evaluate(endpoints, view_map)
+
+    assert reasons(skipped, "UNEXPOSED") == set()
+    unexposed = {f.key.path for f in findings if f.rule_id == "UNEXPOSED"}
+    assert unexposed == {"/debug/pprof"}
+
+
+def test_a_routing_config_reaching_nothing_is_held_back_and_named_as_such(
+    endpoint, view_map
+):
+    """A documentation site's redirect map beside an Ingress at `/`.
+
+    The redirects reach no application route, and the Ingress is a catch-all
+    that says nothing. That is one fact about the scan -- this config does
+    not front this code -- and the no-overlap guard already holds the rule
+    back for it. What it said was written for two endpoint sets ("not one of
+    them lines up"); a routing view does not line up, it reaches, and the
+    diagnostic now says which it failed to do.
+    """
+    endpoints = [endpoint("/", "GET", "k8s_ingress")]
+    endpoints += [endpoint(f"/docs/page{i}", "ANY", "apache_httpd") for i in range(5)]
+    endpoints += [endpoint(f"/api/v1/thing{i}", "GET", "python_flask") for i in range(15)]
+
+    findings, skipped = evaluate(endpoints, view_map)
+
+    assert [f for f in findings if f.rule_id == "UNEXPOSED"] == []
+    assert reasons(skipped, "UNEXPOSED") == {"no-overlap"}
+    detail = next(s.detail for s in skipped if s.rule_id == "UNEXPOSED")
+    assert detail.startswith("5 gateway rules and 15 code endpoints")
+    assert "does not front this code" in detail
+
+
 def test_a_routing_config_that_barely_touches_the_code_demotes_its_findings(
     endpoint, view_map
 ):
@@ -463,3 +531,11 @@ def test_one_added_endpoint_does_not_switch_a_rule_off(endpoint, view_map):
     assert drift_ran(4) is True
     assert drift_ran(5) is True
     assert drift_ran(20) is True
+
+
+def test_an_alternative_ruleset_can_be_named_by_path_string(tmp_path):
+    """`--rules PATH` has the same shape as `--views PATH`, and had the same bug."""
+    alternative = tmp_path / "rules.yml"
+    alternative.write_text("rules: []\n", encoding="utf-8")
+
+    assert RuleSet.load(str(alternative)).rules == []

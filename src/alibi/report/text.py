@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 from ..index import Entry, Index
-from ..rules import Finding, RuleSet, Skipped
-from ..scope import Hint, TestHint, from_tests, suggest
+from ..rules import MAX_UNCORROBORATED_FINDINGS, Finding, RuleSet, Skipped
+from ..scope import Hint, MissingSubtree, TestHint, from_tests, missing_subtree, suggest
 
 # How many findings of one kind to print before saying how many are left.
 GROUP_LIMIT = 12
@@ -146,7 +146,13 @@ def render(
             out("  " + paint(
                 f"Nothing left to report -- {len(suppressed)} finding"
                 f"{'s' if len(suppressed) != 1 else ''} suppressed. See below.", "dim"))
-        elif any(s.reason == "no-overlap" for s in skipped):
+        elif any(s.reason in ("no-overlap", "not-selective") for s in skipped):
+            # Both reasons mean a comparison this scan should have made did
+            # not happen. minio holds 33 routes and one nginx `location /`;
+            # with UNEXPOSED held back for having no selective rule, the only
+            # rule left to run was DANGLING against that same catch-all,
+            # which is suppressed -- so "no disagreement" claimed an
+            # agreement nothing had checked.
             out("  " + paint("No findings -- but nothing was compared. See below.", "medium"))
         elif skipped and len(skipped) == len(rules.rules):
             out("  " + paint("No rule had the views it needs. See below.", "dim"))
@@ -176,6 +182,9 @@ def render(
                       f"({rule_id} in full: -f json)", "dim"))
 
     _render_scope_hint(suggest(index, findings, rules), paint, out)
+    _render_missing_subtree(
+        missing_subtree(findings, index, rules, MAX_UNCORROBORATED_FINDINGS),
+        paint, out)
     _render_test_hint(from_tests(findings, index), paint, out)
     _render_near_misses(findings, paint, out)
     _render_suppressed(suppressed, paint, out)
@@ -376,6 +385,27 @@ def _render_scope_hint(hint: Hint | None, paint: Painter, out) -> None:
     out(paint(f"    alibi scan <paths> --ignore '{hint.ignore_pattern}'", "dim"))
     out(paint("  If it is the same surface left undocumented, they are the "
               "findings that matter most.", "dim"))
+
+
+def _render_missing_subtree(lead: MissingSubtree | None, paint: Painter, out) -> None:
+    """Say when a flood is one missing subtree rather than many missing routes.
+
+    NodeBB's 354 phantom contracts are 207 paths under `/api/v3`, where the
+    code view has nothing at all -- Express routers mounted there that noir
+    did not read. Listed one by one they are 354 lines; named as a subtree
+    they are one question.
+    """
+    if lead is None:
+        return
+    out()
+    out(paint("A SUBTREE ONE VIEW LACKS", "bold"))
+    out(paint(f"  {lead.findings} of the {lead.total} {lead.rule_id} findings sit "
+              f"under {lead.prefix}, and the {lead.absent_view} view has nothing "
+              f"there at all.", "dim"))
+    out(paint("  That is one missing subtree, not that many missing routes: a "
+              "router noir did not\n  read, a mount whose prefix was dropped, or "
+              "a whole surface that was never built.\n  Settle which before "
+              "reading the findings under it one at a time.", "dim"))
 
 
 def _render_test_hint(hint: TestHint | None, paint: Painter, out) -> None:

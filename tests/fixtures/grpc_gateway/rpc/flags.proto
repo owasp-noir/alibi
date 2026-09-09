@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package flags;
+
+import "google/api/annotations.proto";
+
+// The HTTP surface of this service is generated from these annotations by
+// grpc-gateway. The .proto is where the routes are implemented; the OpenAPI
+// document beside it is generated from here.
+service FlagsService {
+  rpc GetFlag(GetFlagRequest) returns (Flag) {
+    option (google.api.http) = {
+      get: "/v1/flags/{key}"
+    };
+  }
+  rpc CreateFlag(CreateFlagRequest) returns (Flag) {
+    option (google.api.http) = {
+      post: "/v1/flags"
+      body: "*"
+    };
+  }
+}
+
+message GetFlagRequest { string key = 1; }
+message CreateFlagRequest { string key = 1; }
+message Flag { string key = 1; bool enabled = 2; }

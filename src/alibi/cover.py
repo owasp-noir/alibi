@@ -111,17 +111,22 @@ class Rule:
     prefix: bool
 
     def reaches(self, target: Key) -> bool:
+        if self.key.catch_all:
+            # `location /` reaches everything. True, and no use as evidence of
+            # anything, so it is not treated as coverage -- of anything, the
+            # code's own `/` fallback included. Letting it reach exactly that
+            # one endpoint made a lone Ingress `path: /` look like a gateway
+            # that had met the code, and 365 findings followed on Casdoor.
+            # The same goes for `/*`, which is the same rule spelled as a
+            # regex; counting one and not the other gave two identical
+            # configs opposite answers.
+            return False
         if self.key.method != WILDCARD_METHOD and self.key.method != target.method:
             return False
         if matches(self.key.path, target.path):
             return True
         if self.prefix:
-            base = self.key.path.rstrip("/")
-            if base in ("", "/"):
-                # `location /` reaches everything. True, and no use as evidence
-                # of anything, so it is not treated as coverage.
-                return False
-            return matches(base + "/*", target.path)
+            return matches(self.key.path.rstrip("/") + "/*", target.path)
         return False
 
 
@@ -148,6 +153,12 @@ def _reaches_any(methods: set[str], wanted: set[str] | None) -> bool:
 class Coverage:
     """The routing rules from one predicate view.
 
+    Catch-all rules are counted but kept out of the rule list. They are not
+    evidence (see `Rule.reaches`), and a view holding nothing else has no
+    evidence to offer: the question "which endpoints does this reach" has
+    the same answer for every endpoint, so an absence from it is not a
+    signal. `selective` is how a rule that reasons from absence asks.
+
     Asked once per code endpoint by three different callers -- the coverage
     statistics, the "no gateway reaches this" rule, and the check that the
     views connected at all -- so every answer is kept. And the rules without
@@ -158,12 +169,19 @@ class Coverage:
     need it are a handful.
     """
 
-    def __init__(self, rules: list[Rule]) -> None:
+    def __init__(self, rules: list[Rule], catch_alls: int = 0) -> None:
         self._rules = rules
+        self.catch_alls = catch_alls
         self._answers: dict[Key, bool] = {}
         self._root = _Node()
         self._patterned: list[Rule] = []
         for rule in rules:
+            # A catch-all reaches nothing, so it goes into neither half of
+            # the index. `from_entries` already keeps these out of `rules`;
+            # this is for a Coverage built directly, which must still answer
+            # exactly what `Rule.reaches` answers.
+            if rule.key.catch_all:
+                continue
             parts = segments(rule.key.path)
             if not _plain_pattern(parts):
                 self._patterned.append(rule)
@@ -171,25 +189,38 @@ class Coverage:
             node = self._root
             for part in parts:
                 node = node.children.setdefault(part, _Node())
-            base = rule.key.path.rstrip("/")
-            if rule.prefix and base not in ("", "/"):
+            if rule.prefix:
                 node.beneath.add(rule.key.method)
             else:
-                # `location /` reaches everything, and is not counted as
-                # reaching anything -- see `Rule.reaches`. Exact only.
                 node.ends.add(rule.key.method)
 
     @classmethod
     def from_entries(cls, entries, view: str) -> Coverage:
-        rules = [
-            Rule(key=entry.key, view=view, prefix=True)
-            for entry in entries
-            if view in entry.views
-        ]
-        return cls(rules)
+        rules: list[Rule] = []
+        catch_alls = 0
+        for entry in entries:
+            if view not in entry.views:
+                continue
+            if entry.key.catch_all:
+                catch_alls += 1
+                continue
+            rules.append(Rule(key=entry.key, view=view, prefix=True))
+        return cls(rules, catch_alls)
 
     def __len__(self) -> int:
         return len(self._rules)
+
+    @property
+    def selective(self) -> bool:
+        """Does any rule here name something narrower than everything?"""
+        return bool(self._rules)
+
+    def reaching(self, target: Key) -> Rule | None:
+        """Which rule reaches this, if any. Linear; `covers` is the fast ask."""
+        for rule in self._rules:
+            if rule.reaches(target):
+                return rule
+        return None
 
     def covers(self, target: Key) -> bool:
         answer = self._answers.get(target)
@@ -242,6 +273,10 @@ class KeySet:
             node.ends.add(key.method)
 
     def reached_by(self, rule: Rule) -> bool:
+        # The same rule as in `Coverage`, from the other side: a catch-all
+        # reaches nothing, so it reaches nothing here either.
+        if rule.key.catch_all:
+            return False
         parts = segments(rule.key.path)
         if not _plain_pattern(parts):
             return any(rule.reaches(key) for key in self._keys)
@@ -254,8 +289,8 @@ class KeySet:
                      if child is not None]
             if not nodes:
                 return False
-        base = rule.key.path.rstrip("/")
-        prefix = rule.prefix and base not in ("", "/")
+        # No `base in ("", "/")` guard here or in `Coverage`: a rule whose
+        # path is bare `/` is a catch-all and returned above.
         return any(_reaches_any(node.ends, wanted)
-                   or (prefix and _reaches_any(node.beneath, wanted))
+                   or (rule.prefix and _reaches_any(node.beneath, wanted))
                    for node in nodes)

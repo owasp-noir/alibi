@@ -180,3 +180,122 @@ def test_the_suggested_command_suppresses_exactly_what_was_counted(endpoint, vie
     # A different top-level segment that merely starts with the same letters
     # is still outside.
     assert "/apifoo" in {f.key.path for f, _ in dropped}
+
+
+# --- when the views part company along a prefix ------------------------------
+
+def test_views_that_line_up_once_a_prefix_comes_off_are_told_so(endpoint, view_map):
+    """Gitea: the spec declares `basePath: /GITEA-API-APP-SUBURL/api/v1`.
+
+    Noir prefixes every documented path with it, its Go reader drops the
+    `/api/v1` mount, and the two views share nothing. "Check whether one
+    side is a mount point" is true and no help; "154 of 535 doc paths match
+    a code path once three segments come off" names the prefix and the side.
+    """
+    from alibi.scope import realign
+
+    endpoints = [
+        endpoint(f"/SUBURL/api/v1/repos/{{owner}}/thing{i}", "GET", "oas3")
+        for i in range(15)
+    ]
+    endpoints += [endpoint(f"/repos/{{owner}}/thing{i}", "GET", "go_chi") for i in range(15)]
+    endpoints += [endpoint(f"/SUBURL/api/v1/other{i}", "GET", "oas3") for i in range(5)]
+
+    index, findings, ruleset = scan(endpoints, view_map)
+    lead = realign(index, "code", "doc", floor=10)
+
+    assert lead is not None
+    assert (lead.view, lead.other) == ("doc", "code")
+    assert lead.prefix == "/SUBURL/api/v1"
+    assert lead.segments == 3
+    assert (lead.aligned, lead.total) == (15, 20)
+    # It reaches the report through the held-back detail, since SHADOW and
+    # PHANTOM were rightly held back for never meeting.
+    _, skipped = ruleset.evaluate(index, {"code", "doc"})
+    detail = next(s.detail for s in skipped if s.rule_id == "PHANTOM")
+    assert "15 of the 20 doc paths under /SUBURL/api/v1" in detail
+    assert "3 leading segments" in detail
+
+
+def test_two_unrelated_surfaces_are_not_told_they_line_up(endpoint, view_map):
+    """authentik: a Django API under /api/v3 and a Rust outpost noir reads.
+
+    Nothing lines up at any depth, and a diagnostic that offered a prefix
+    anyway would send the reader after a bug that is not there. Measured on
+    the corpus, the unrelated pairs align 0 paths; gitea aligns 154.
+    """
+    from alibi.scope import realign
+
+    endpoints = [endpoint(f"/api/v3/core/thing{i}", "GET", "oas3") for i in range(30)]
+    endpoints += [endpoint(f"/outpost/route{i}", "GET", "rust_axum") for i in range(30)]
+
+    index, _, ruleset = scan(endpoints, view_map)
+    assert realign(index, "code", "doc", floor=10) is None
+    _, skipped = ruleset.evaluate(index, {"code", "doc"})
+    assert "mount point" in next(s.detail for s in skipped if s.rule_id == "SHADOW")
+
+
+def test_a_parameter_is_not_a_prefix_and_a_bare_parameter_is_not_a_match(
+    endpoint, view_map
+):
+    """`/{}` stripped of anything matches every `/{}`, and says nothing."""
+    from alibi.scope import realign
+
+    endpoints = [endpoint(f"/{{tenant}}/x{i}/{{id}}", "GET", "oas3") for i in range(15)]
+    endpoints += [endpoint(f"/x{i}/{{id}}", "GET", "go_chi") for i in range(15)]
+    endpoints += [endpoint(f"/v1/things{i}/{{id}}", "GET", "oas3") for i in range(15)]
+    endpoints += [endpoint("/{id}", "GET", "go_chi")]
+
+    index, _, _ = scan(endpoints, view_map)
+    assert realign(index, "code", "doc", floor=10) is None
+
+
+def test_a_flood_that_is_one_missing_subtree_is_named_as_one(endpoint, view_map):
+    """NodeBB documents 207 paths under /api/v3; noir reads none of the
+    Express routers mounted there. Listed one by one that is 207 phantom
+    contracts; named as a subtree it is one question."""
+    from alibi.scope import missing_subtree
+
+    endpoints = [endpoint(f"/api/v3/users/{i}", "POST", "oas3") for i in range(20)]
+    endpoints += [endpoint(f"/api/page{i}", "GET", "oas3") for i in range(12)]
+    endpoints += [endpoint(f"/api/page{i}", "GET", "js_express") for i in range(12)]
+    endpoints += [endpoint("/api/only-here", "GET", "js_express")]
+
+    index, findings, ruleset = scan(endpoints, view_map)
+    lead = missing_subtree(findings, index, ruleset, floor=10)
+
+    assert lead is not None
+    assert lead.rule_id == "PHANTOM"
+    assert lead.prefix == "/api/v3"
+    assert lead.absent_view == "code"
+    assert (lead.findings, lead.total) == (20, 20)
+
+
+def test_a_subtree_the_scope_hint_already_explains_is_not_named_twice(
+    endpoint, view_map
+):
+    """NetBox's web UI under /dcim is a second surface, and the scope hint
+    says so. Calling it a subtree the specification lacks would be the same
+    observation with a worse explanation."""
+    from alibi.scope import missing_subtree, suggest
+
+    endpoints = [endpoint(f"/api/thing{i}", "GET", "oas3") for i in range(20)]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(20)]
+    endpoints += [endpoint(f"/dcim/page{i}", "GET", "python_flask") for i in range(15)]
+
+    index, findings, ruleset = scan(endpoints, view_map)
+    assert suggest(index, findings, ruleset) is not None
+    assert missing_subtree(findings, index, ruleset, floor=10) is None
+
+
+def test_a_subtree_the_other_view_does_hold_is_not_missing(endpoint, view_map):
+    """NetBox's 418 phantoms are bulk verbs on collections the code serves
+    under the same prefix -- that is a different and smaller thing."""
+    from alibi.scope import missing_subtree
+
+    endpoints = [endpoint(f"/api/ipam/thing{i}", "PATCH", "oas3") for i in range(20)]
+    endpoints += [endpoint(f"/api/ipam/thing{i}", "GET", "oas3") for i in range(20)]
+    endpoints += [endpoint(f"/api/ipam/thing{i}", "GET", "python_flask") for i in range(20)]
+
+    index, findings, ruleset = scan(endpoints, view_map)
+    assert missing_subtree(findings, index, ruleset, floor=10) is None

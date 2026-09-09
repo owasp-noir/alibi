@@ -45,3 +45,34 @@ def test_schema_driven_platforms_count_as_implementation():
     view_map = ViewMap.load()
     for tech in ("hasura", "strapi", "supabase", "directus", "appwrite"):
         assert view_map.lookup(tech).view == "code"
+
+
+def test_an_alternative_view_map_can_be_named_by_path_string(tmp_path):
+    """`--views PATH` reaches `load` as a string, and a string has no `open`.
+
+    Every scan with an alternative map died on that before noir ran -- the
+    one flag for changing which view a technology speaks for could never be
+    used.
+    """
+    alternative = tmp_path / "views.yml"
+    alternative.write_text(
+        "default: code\nviews:\n  code: {}\n  doc: {}\ntechs:\n  grpc: code\n",
+        encoding="utf-8")
+
+    view_map = ViewMap.load(str(alternative))
+    assert view_map.lookup("grpc").view == "code"
+
+
+def test_a_proto_with_http_annotations_is_implementation_not_contract():
+    """`grpc: code`, and why.
+
+    Noir's grpc analyzer emits an HTTP route from one thing only: an
+    `option (google.api.http)` annotation. That annotation is what a
+    gRPC-gateway generates its serving routes from, so the proto is where
+    the HTTP surface is implemented, and the OpenAPI document next to it is
+    generated from the proto. Filed as doc, the two corroborated each other
+    and the Go code never entered the comparison -- flipt reported 0 of 42
+    documented paths corroborated, Argo CD 0 of 106, and both were held back
+    as views that never met. Filed as code, flipt corroborates 36 of 36.
+    """
+    assert ViewMap.load().lookup("grpc").view == "code"

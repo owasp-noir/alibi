@@ -6,8 +6,53 @@ Notable changes to alibi. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `grpc` speaks for the code view. A .proto's `option (google.api.http)` is
+  what generates a gRPC-gateway's HTTP surface, and noir emits an HTTP route
+  from nothing else -- so the proto is where those routes are implemented,
+  and the OpenAPI document beside it was generated from it. Filed as doc, the
+  two corroborated each other and the Go code never entered the comparison:
+  flipt and Argo CD both reported 0 documented paths corroborated and were
+  held back as views that never met. flipt now corroborates 36 of 36 and
+  Argo CD 38 of 106.
+
+### Added
+
+- `alibi scan -f json --endpoints` lists what every view actually held:
+  method, path, protocol, which views vouched for it, the technologies
+  behind it, the spelling before normalization, and the files. Without it,
+  debugging any finding started by re-running noir once per view by hand
+  with the same `--only-techs` lists and joining the results. Behind a flag
+  because it is large -- three to four times the rest of the payload on a
+  repository with findings.
+- When two views share no endpoint at all, the held-back diagnostic now says
+  whether they line up once a constant prefix comes off one side. Gitea's
+  generated specification declares `basePath: /GITEA-API-APP-SUBURL/api/v1`
+  and its Go router mounts `/api/v1`, which noir's reader drops, so the two
+  views share nothing: the report said "check whether one side is a mount
+  point", and now says that 154 of the 535 documented paths match a code
+  path once three leading segments are removed. That sentence names the
+  prefix and sends the reader to the two files that disagree.
+- A flood of findings that is really one subtree the other view lacks is
+  named as one. NodeBB's 354 phantom contracts include 207 paths under
+  `/api/v3`, where the code view holds nothing at all -- Express routers
+  mounted through a helper noir does not follow. One question, not 207.
+
 ### Fixed
 
+- `--views` and `--rules` crashed before noir ran: both loaders were written
+  for a `Path` and both flags hand them a string.
+- A gateway made of nothing but a catch-all holds `UNEXPOSED` back and says
+  so. Casdoor's Helm chart declares one Ingress rule, at `/`; coverage
+  already refused to count `location /` as reaching anything, but let it
+  reach the code's own `/` fallback, and that one touch was enough for the
+  no-overlap guard to believe the views had met. 365 findings followed, each
+  carrying the note that the routing config probably does not front the
+  code. A catch-all now reaches nothing at all -- `/*` included, which was
+  counted as reaching everything while `/` counted as nothing -- and a rule
+  that reasons from what a routing view does not reach needs that view to
+  hold at least one rule narrower than everything.
 - An empty scan says what noir could not read. The report returned before it
   printed a single error, so a directory holding one OpenAPI document noir
   could not parse rendered as `Point alibi at a directory holding some of

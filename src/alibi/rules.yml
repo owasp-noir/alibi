@@ -96,6 +96,11 @@ rules:
     summary: Implemented, but no gateway rule reaches it
     present: [code]
     needs: [code, gateway]
+    # A gateway made only of catch-alls (`location /`, an Ingress at `/`)
+    # routes everything or nothing, and cannot say which for any one
+    # endpoint. This rule reasons from what the gateway does *not* reach, so
+    # it needs at least one rule narrower than that.
+    needs_selective: [gateway]
     when: { not_covered_by: gateway }
     severity: low
     detail: >-

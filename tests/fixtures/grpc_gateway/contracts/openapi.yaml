@@ -1,0 +1,26 @@
+openapi: 3.0.0
+info:
+  title: Flags
+  version: "1.0"
+paths:
+  /v1/flags/{key}:
+    get:
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: the flag
+  /v1/flags:
+    post:
+      responses:
+        "200":
+          description: created
+  /v1/segments:
+    get:
+      responses:
+        "200":
+          description: never built
