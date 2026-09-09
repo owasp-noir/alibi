@@ -100,6 +100,21 @@ informative part, and `-f json` has all of it.
   with: { sarif_file: alibi.sarif }
 ```
 
+### Seeing what each view held
+
+The report says the views disagree; `--endpoints` says what each of them
+contained.
+
+```console
+$ alibi scan ./repo -f json --endpoints
+```
+
+Every view gets a list: the key, which views vouched for it, the technologies
+behind it, the files, and the spelling before normalization — which is where
+the difference always is when two rows should have matched and did not. It is
+three to four times the rest of the payload, so it is a flag rather than the
+default.
+
 Or gate directly: `alibi scan . ./contracts --fail-on high` exits non-zero when
 a finding reaches that severity. A scan noir could not read in full reports
 `executionSuccessful: false`, so a degraded run does not pass as a clean one.

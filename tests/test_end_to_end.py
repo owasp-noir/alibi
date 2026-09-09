@@ -224,3 +224,41 @@ def test_a_proto_with_http_annotations_corroborates_the_document_generated_from_
         ("SHADOW", "GET", "/healthz"),
         ("PHANTOM", "GET", "/v1/segments"),
     }
+
+
+@requires_noir
+def test_a_scan_of_a_real_tree_can_be_debugged_from_the_json_alone(tmp_path, capsys):
+    """Follow the advice: the prefix diagnosis, recomputed from the report.
+
+    Gitea's specification carries a `basePath` its code does not, and that
+    was found by re-running noir by hand. With the lists in the report, the
+    same conclusion comes out of one scan -- which is the whole claim the
+    flag makes.
+    """
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text(
+        "from flask import Flask\n\napp = Flask(__name__)\n\n\n"
+        '@app.route("/repos/<owner>")\ndef repos(owner):\n    return owner\n',
+        encoding="utf-8")
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "contracts" / "openapi.yaml").write_text(
+        "openapi: 3.0.0\ninfo:\n  title: t\n  version: '1'\n"
+        "servers:\n  - url: /PLACEHOLDER/api/v1\n"
+        "paths:\n  /repos/{owner}:\n    get:\n"
+        "      parameters:\n        - name: owner\n          in: path\n"
+        "          required: true\n          schema:\n            type: string\n"
+        "      responses:\n        '200':\n          description: ok\n",
+        encoding="utf-8")
+
+    assert cli.main(["scan", str(tmp_path), "-f", "json", "--endpoints"]) in (
+        cli.EXIT_OK, cli.EXIT_FINDINGS)
+    document = json.loads(capsys.readouterr().out)
+
+    code = {(row["method"], row["path"]) for row in document["endpoints"]["code"]}
+    doc = {(row["method"], row["path"]) for row in document["endpoints"]["doc"]}
+    assert code and doc and not (code & doc)
+
+    # The reader's own arithmetic, on nothing but the report.
+    stripped = {(method, "/" + path.split("/", 4)[4])
+                for method, path in doc if path.count("/") >= 4}
+    assert stripped & code

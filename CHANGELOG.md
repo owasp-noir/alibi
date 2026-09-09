@@ -19,6 +19,13 @@ Notable changes to alibi. The format follows
 
 ### Added
 
+- `alibi scan -f json --endpoints` lists what every view actually held:
+  method, path, protocol, which views vouched for it, the technologies
+  behind it, the spelling before normalization, and the files. Without it,
+  debugging any finding started by re-running noir once per view by hand
+  with the same `--only-techs` lists and joining the results. Behind a flag
+  because it is large -- three to four times the rest of the payload on a
+  repository with findings.
 - When two views share no endpoint at all, the held-back diagnostic now says
   whether they line up once a constant prefix comes off one side. Gitea's
   generated specification declares `basePath: /GITEA-API-APP-SUBURL/api/v1`
