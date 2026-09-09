@@ -8,6 +8,16 @@ Notable changes to alibi. The format follows
 
 ### Fixed
 
+- A gateway made of nothing but a catch-all holds `UNEXPOSED` back and says
+  so. Casdoor's Helm chart declares one Ingress rule, at `/`; coverage
+  already refused to count `location /` as reaching anything, but let it
+  reach the code's own `/` fallback, and that one touch was enough for the
+  no-overlap guard to believe the views had met. 365 findings followed, each
+  carrying the note that the routing config probably does not front the
+  code. A catch-all now reaches nothing at all -- `/*` included, which was
+  counted as reaching everything while `/` counted as nothing -- and a rule
+  that reasons from what a routing view does not reach needs that view to
+  hold at least one rule narrower than everything.
 - An empty scan says what noir could not read. The report returned before it
   printed a single error, so a directory holding one OpenAPI document noir
   could not parse rendered as `Point alibi at a directory holding some of

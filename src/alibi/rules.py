@@ -136,6 +136,28 @@ class RuleSet:
                 ))
                 continue
 
+            # The routing-view twin of `needs_observed`. A gateway made of
+            # nothing but `location /` routes everything or nothing, and
+            # either way the same for every endpoint -- so "no rule reaches
+            # this one" is not a finding, it is the shape of the config.
+            # Casdoor's Helm chart declares one Ingress at `/`, and read as
+            # evidence it produced 365 findings saying nothing was exposed.
+            blanket = [
+                view for view in rule.get("needs_selective", [])
+                if (coverage := index.coverages.get(view)) is not None
+                and not coverage.selective
+            ]
+            if blanket:
+                catch_alls = sum(index.coverages[v].catch_alls for v in blanket)
+                skipped.append(Skipped(
+                    rule["id"], "not-selective",
+                    f"the {', '.join(blanket)} view holds nothing but "
+                    f"{catch_alls} catch-all rule{'s' if catch_alls != 1 else ''} "
+                    f"at / in this scan, and a rule that routes everything or "
+                    f"nothing cannot say what it does not reach",
+                ))
+                continue
+
             runnable.append(rule)
 
         per_rule: dict[str, list[Finding]] = {rule["id"]: [] for rule in runnable}
@@ -195,6 +217,24 @@ class RuleSet:
         connection = self._connection(index, left, right)
         if connection > 0:
             return None
+
+        routing = [v for v in views if v in index.coverages]
+        if len(routing) == 1:
+            # One side is a routing config. It did not fail to share keys --
+            # it reached nothing, which is a statement about which service
+            # this config fronts. Superset's gateway view is its docs site's
+            # `.htaccess`: 37 rules, 0 of 277 Flask routes reached.
+            routes, other = routing[0], next(v for v in views if v != routing[0])
+            rules_count = len(index.coverages[routes])
+            return Skipped(
+                rule["id"], "no-overlap",
+                f"{rules_count} {routes} rule{'s' if rules_count != 1 else ''} "
+                f"and {index.population(other)} {other} endpoints, and not one "
+                f"rule reaches a single endpoint -- this routing config does "
+                f"not front this code, so every endpoint would qualify. A "
+                f"catch-all at / does not count: it routes everything or "
+                f"nothing and says which for no endpoint in particular.",
+            )
 
         return Skipped(
             rule["id"], "no-overlap",

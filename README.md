@@ -214,6 +214,13 @@ The report says how much of the code each routing view reaches, because whether
 one fronting the service. No threshold separates those honestly: Argo CD's e2e
 test fixture reaches 39% of its code and NetBox's real config reaches 100%.
 
+A catch-all — `location /`, an Ingress at `/`, a `RewriteRule ^(.*)$` — is not
+evidence either way. It routes everything or nothing, the same for every
+endpoint, so it counts as reaching none of them. A gateway view holding nothing
+else has no signal to offer, and `UNEXPOSED` sits out and says so rather than
+reporting every endpoint as unreachable. Casdoor's Helm chart is exactly that:
+one Ingress rule at `/`, which read as evidence produced 365 findings.
+
 ### Traffic has to have been watched
 
 A HAR capture records requests that happened. A Postman collection records

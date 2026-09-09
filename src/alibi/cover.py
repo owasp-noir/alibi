@@ -100,37 +100,59 @@ class Rule:
     prefix: bool
 
     def reaches(self, target: Key) -> bool:
+        if self.key.catch_all:
+            # `location /` reaches everything. True, and no use as evidence of
+            # anything, so it is not treated as coverage -- of anything, the
+            # code's own `/` fallback included. Letting it reach exactly that
+            # one endpoint made a lone Ingress `path: /` look like a gateway
+            # that had met the code, and 365 findings followed on Casdoor.
+            # The same goes for `/*`, which is the same rule spelled as a
+            # regex; counting one and not the other gave two identical
+            # configs opposite answers.
+            return False
         if self.key.method != WILDCARD_METHOD and self.key.method != target.method:
             return False
         if matches(self.key.path, target.path):
             return True
         if self.prefix:
-            base = self.key.path.rstrip("/")
-            if base in ("", "/"):
-                # `location /` reaches everything. True, and no use as evidence
-                # of anything, so it is not treated as coverage.
-                return False
-            return matches(base + "/*", target.path)
+            return matches(self.key.path.rstrip("/") + "/*", target.path)
         return False
 
 
 class Coverage:
-    """The routing rules from one predicate view."""
+    """The routing rules from one predicate view.
 
-    def __init__(self, rules: list[Rule]) -> None:
+    Catch-all rules are counted but kept out of the rule list. They are not
+    evidence (see `Rule.reaches`), and a view holding nothing else has no
+    evidence to offer: the question "which endpoints does this reach" has
+    the same answer for every endpoint, so an absence from it is not a
+    signal. `selective` is how a rule that reasons from absence asks.
+    """
+
+    def __init__(self, rules: list[Rule], catch_alls: int = 0) -> None:
         self._rules = rules
+        self.catch_alls = catch_alls
 
     @classmethod
     def from_entries(cls, entries, view: str) -> Coverage:
-        rules = [
-            Rule(key=entry.key, view=view, prefix=True)
-            for entry in entries
-            if view in entry.views
-        ]
-        return cls(rules)
+        rules: list[Rule] = []
+        catch_alls = 0
+        for entry in entries:
+            if view not in entry.views:
+                continue
+            if entry.key.catch_all:
+                catch_alls += 1
+                continue
+            rules.append(Rule(key=entry.key, view=view, prefix=True))
+        return cls(rules, catch_alls)
 
     def __len__(self) -> int:
         return len(self._rules)
+
+    @property
+    def selective(self) -> bool:
+        """Does any rule here name something narrower than everything?"""
+        return bool(self._rules)
 
     def reaching(self, target: Key) -> Rule | None:
         for rule in self._rules:
