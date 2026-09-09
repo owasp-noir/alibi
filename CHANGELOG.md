@@ -78,9 +78,10 @@ Notable changes to alibi. The format follows
   question ran a glob matcher over every rule or every endpoint -- so the cost
   grew with the square of the scan. Near misses are found by lookup, and
   routing questions are answered from a trie of path segments. A synthetic
-  scan of 20,000 endpoints spent 60.6 s below the collection step and now
-  spends 1.1 s; 50,000 went from 6 minutes 24 s to 2.9 s. On the twelve
-  repositories measured, where noir dominates, the end-to-end saving is 2-8%.
+  scan of 20,000 endpoints spent 62 s below the collection step and now spends
+  0.9 s; 50,000 went from 8 minutes to 2.7 s. On the twelve repositories
+  measured this is not what you feel: noir is 95% or more of every one of
+  them, and alibi's own share is already under a tenth of a second.
 - `REVIEW` collects the entries it lists by identity rather than by searching
   the list it is building, which was quadratic in the number of uncertain
   findings.
