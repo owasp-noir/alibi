@@ -56,9 +56,11 @@ def render(
     def out(line=""):
         print(line, file=stream)
 
+    # Sorted, so the order the views are listed in does not depend on the
+    # interpreter's hash seed: `entry.views` is a set.
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
-        for view in entry.views:
+        for view in sorted(entry.views):
             view_counts[view] = view_counts.get(view, 0) + 1
 
     out()

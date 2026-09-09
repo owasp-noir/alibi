@@ -12,9 +12,11 @@ from ..scope import from_tests, suggest
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
           sources: list[str], errors: list = (), suppressed: list = (),
           ruleset=None) -> dict:
+    # Sorted, so the order the views are listed in does not depend on the
+    # interpreter's hash seed: `entry.views` is a set.
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
-        for view in entry.views:
+        for view in sorted(entry.views):
             view_counts[view] = view_counts.get(view, 0) + 1
 
     return {

@@ -27,7 +27,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -313,16 +313,22 @@ def scan_views(source: Source, noir_bin: str, techs_by_view: dict[str, list[str]
 
     The runs are independent processes waiting on I/O, so they overlap. Noir
     parallelises internally too, which is why the pool is small.
+
+    Results are read back in the order the views were submitted, not the
+    order the scans finished. Everything downstream keeps endpoints in the
+    order they arrive -- which file a finding is reported at, the order of
+    the review list -- so reading them as they completed made the report
+    depend on which noir process won a race.
     """
     endpoints: list[RawEndpoint] = []
     errors: list[ScanError] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(scan, source, noir_bin, extra_args, only_techs=techs): view
-            for view, techs in techs_by_view.items()
+        futures = [
+            pool.submit(scan, source, noir_bin, extra_args, only_techs=techs)
+            for techs in techs_by_view.values()
             if techs
-        }
-        for future in as_completed(futures):
+        ]
+        for future in futures:
             result = future.result()
             endpoints.extend(result.endpoints)
             errors.extend(result.errors)

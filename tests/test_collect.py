@@ -219,3 +219,38 @@ def test_two_sources_with_one_basename_are_still_two_sources():
     # A basename of its own is still the name -- it is what fits in a column.
     plain = sources(["./app", "./contracts"])
     assert [s.name for s in plain] == ["app", "contracts"]
+
+
+def test_the_views_come_back_in_the_order_they_were_submitted(tmp_path, monkeypatch):
+    """Not in the order the scans happened to finish.
+
+    Everything downstream keeps endpoints in the order they arrive: which
+    file a finding reports as its location is the first `code_path` on it,
+    and that is whichever view's scan landed first. Read as they completed,
+    two runs of one unchanged repository produced different reports -- the
+    released 0.1.0 gave four distinct outputs in five runs of kong.
+
+    The scans here finish in reverse: the view submitted first sleeps
+    longest, so completion order cannot be mistaken for submission order.
+    """
+    import time
+
+    delays = {"python_flask": 0.15, "oas3": 0.05, "har": 0.0}
+
+    def slow_scan(source, noir_bin, extra_args=None, timeout=900, only_techs=None):
+        tech = only_techs[0]
+        time.sleep(delays[tech])
+        return collect.ScanResult(
+            endpoints=[collect.RawEndpoint(url=f"/{tech}", method="GET",
+                                           technology=tech, source="s")],
+            errors=[],
+        )
+
+    monkeypatch.setattr(collect, "scan", slow_scan)
+
+    result = collect.scan_views(
+        collect.Source(str(tmp_path)), "noir",
+        {"code": ["python_flask"], "doc": ["oas3"], "traffic": ["har"]},
+    )
+
+    assert [e.url for e in result.endpoints] == ["/python_flask", "/oas3", "/har"]
