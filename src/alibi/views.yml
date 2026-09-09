@@ -41,7 +41,6 @@ techs:
   typespec: doc
   asyncapi: doc
   graphql_sdl: doc
-  grpc: doc
   odata: doc
   openrpc: doc
 
@@ -95,6 +94,19 @@ techs:
   directus: code
   appwrite: code
   payload_cms: code
+
+  # A .proto is where a gRPC-gateway project implements its HTTP surface.
+  # Noir's grpc analyzer emits an HTTP route only from an `option
+  # (google.api.http)` annotation, and that annotation is exactly what
+  # generates the serving gateway -- the OpenAPI document beside it is
+  # generated *from* the proto. Filed as doc, the proto corroborated the
+  # document it produced and the Go code never entered the comparison: flipt
+  # showed 0 of 42 documented paths corroborated and Argo CD 0 of 106, both
+  # held back as "the views never met". Filed as code, flipt corroborates
+  # 36 of 36 and Argo CD 38 of 106 (the rest is annotation syntax noir does
+  # not read yet). The native `/package.Service/Method` paths ride along
+  # under their own protocol, which no rule compares to HTTP contracts.
+  grpc: code
 
   # Mobile entry points are implemented surface too -- a deep link is a route
   # into a running app.

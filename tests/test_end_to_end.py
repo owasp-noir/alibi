@@ -181,3 +181,84 @@ def test_the_corroborated_endpoints_raise_nothing():
     }
     assert len(flagged) == 1
     assert "looks like a mount" in next(iter(flagged.values()))
+
+
+GRPC_FIXTURE = Path(__file__).parent / "fixtures" / "grpc_gateway"
+
+
+@requires_noir
+def test_a_proto_with_http_annotations_corroborates_the_document_generated_from_it():
+    """The gRPC-gateway shape, and why `grpc` speaks for the code view.
+
+    The fixture is a .proto whose two rpcs carry `option (google.api.http)`,
+    one Flask route, and an OpenAPI document listing the two proto routes and
+    one more. Filed as doc, the proto and the document corroborated each
+    other and every route the Go or Python code did not hold read as a
+    phantom -- which on flipt and Argo CD was every documented route, and
+    both were held back as views that never met.
+
+    Run through the real pipeline rather than one noir call, because the
+    whole point is per-view scanning: in a single scan noir deduplicates the
+    proto's `/v1/flags/{key}` against the document's, and the corroboration
+    this test is about is exactly what that erases.
+    """
+    view_map = ViewMap.load()
+    catalog = collect.list_techs(_noir())
+    source = collect.Source(str(GRPC_FIXTURE))
+    result = collect.scan_views(source, _noir(), view_map.techs_by_view(catalog))
+    index = build(result.endpoints, view_map)
+    views = {v for entry in index.entries.values() for v in entry.views}
+    findings, skipped = RuleSet.load().evaluate(index, views)
+
+    assert views == {"code", "doc"}
+    assert not [s for s in skipped if s.rule_id in {"SHADOW", "PHANTOM"}]
+
+    corroborated = {str(e.key) for e in index.entries.values() if len(e.views) > 1}
+    assert corroborated == {"GET /v1/flags/{}", "POST /v1/flags"}
+    for entry in index.entries.values():
+        if len(entry.views) > 1:
+            assert entry.techs == {"grpc", "oas3"}
+
+    reported = {(f.rule_id, f.key.method, f.key.path) for f in findings}
+    assert reported == {
+        ("SHADOW", "GET", "/healthz"),
+        ("PHANTOM", "GET", "/v1/segments"),
+    }
+
+
+@requires_noir
+def test_a_scan_of_a_real_tree_can_be_debugged_from_the_json_alone(tmp_path, capsys):
+    """Follow the advice: the prefix diagnosis, recomputed from the report.
+
+    Gitea's specification carries a `basePath` its code does not, and that
+    was found by re-running noir by hand. With the lists in the report, the
+    same conclusion comes out of one scan -- which is the whole claim the
+    flag makes.
+    """
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text(
+        "from flask import Flask\n\napp = Flask(__name__)\n\n\n"
+        '@app.route("/repos/<owner>")\ndef repos(owner):\n    return owner\n',
+        encoding="utf-8")
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "contracts" / "openapi.yaml").write_text(
+        "openapi: 3.0.0\ninfo:\n  title: t\n  version: '1'\n"
+        "servers:\n  - url: /PLACEHOLDER/api/v1\n"
+        "paths:\n  /repos/{owner}:\n    get:\n"
+        "      parameters:\n        - name: owner\n          in: path\n"
+        "          required: true\n          schema:\n            type: string\n"
+        "      responses:\n        '200':\n          description: ok\n",
+        encoding="utf-8")
+
+    assert cli.main(["scan", str(tmp_path), "-f", "json", "--endpoints"]) in (
+        cli.EXIT_OK, cli.EXIT_FINDINGS)
+    document = json.loads(capsys.readouterr().out)
+
+    code = {(row["method"], row["path"]) for row in document["endpoints"]["code"]}
+    doc = {(row["method"], row["path"]) for row in document["endpoints"]["doc"]}
+    assert code and doc and not (code & doc)
+
+    # The reader's own arithmetic, on nothing but the report.
+    stripped = {(method, "/" + path.split("/", 4)[4])
+                for method, path in doc if path.count("/") >= 4}
+    assert stripped & code
