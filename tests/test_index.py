@@ -409,3 +409,88 @@ def test_an_aggregate_document_beside_its_sources_still_reports(
 
     assert len(conflated) == 1
     assert conflated[0][1] == ["assets", "server/account"]
+
+
+def _near_misses_the_slow_way(index):
+    """The pre-index search, kept as the oracle for the indexed one.
+
+    Mount detection walked every entry for every lone entry, and the
+    one-segment search compared every lone entry against every entry of the
+    same verb and depth. Both were replaced by lookups, and the only thing
+    that makes a lookup safe is that it finds exactly what the search found.
+    """
+    from collections import defaultdict
+
+    from alibi.index import MOUNT_THRESHOLD, _one_segment_apart
+
+    by_shape = defaultdict(list)
+    for entry in index.entries.values():
+        by_shape[(entry.key.method, entry.key.path.count("/"))].append(entry)
+
+    found = {}
+    for entry in index.entries.values():
+        if len(entry.views) != 1:
+            continue
+        mine = entry.views
+        misses = []
+        for other in by_shape[(entry.key.method, entry.key.path.count("/"))]:
+            if other is entry or other.views <= mine:
+                continue
+            reason = _one_segment_apart(entry.key.path, other.key.path)
+            if reason:
+                misses.append((other.key, tuple(sorted(other.views)), reason))
+
+        prefix = entry.key.path.rstrip("/")
+        if prefix not in ("", "/"):
+            beneath, paths, segs = set(), set(), set()
+            for other in index.entries.values():
+                if other is entry or other.key.path == entry.key.path:
+                    continue
+                if not other.key.path.startswith(prefix + "/"):
+                    continue
+                if other.views <= entry.views:
+                    continue
+                beneath |= other.views
+                paths.add(other.key.path)
+                segs.add(other.key.path[len(prefix) + 1:].split("/")[0])
+            if len(paths) >= MOUNT_THRESHOLD and not (
+                    segs and all(s in ("{}", "*") for s in segs)):
+                misses.append((None, tuple(sorted(beneath)),
+                               f"looks like a mount: {len(paths)} paths in "
+                               f"{', '.join(sorted(beneath))} live beneath this one"))
+        if misses:
+            found[entry.key] = misses
+    return found
+
+
+def test_the_indexed_near_miss_search_finds_what_the_scan_found():
+    """Random multi-view scans, both algorithms, same answer in the same order."""
+    import random
+
+    from alibi.collect import RawEndpoint
+    from alibi.index import build
+    from alibi.views import ViewMap
+
+    rng = random.Random(3)
+    words = ["api", "v1", "users", "orders", "items", "x", "y", "{}", "*",
+             "a-{}", "reports.{}", ".well-known"]
+    techs = {"code": "python_flask", "doc": "oas3", "traffic": "har",
+             "gateway": "nginx", "infra": "terraform"}
+
+    for _ in range(120):
+        raws = []
+        for _ in range(rng.randint(0, 60)):
+            depth = rng.randint(1, 4)
+            path = "/" + "/".join(rng.choice(words) for _ in range(depth))
+            raws.append(RawEndpoint(
+                url=path, method=rng.choice(["GET", "POST", "DELETE"]),
+                technology=techs[rng.choice(list(techs))], source="s"))
+        index = build(raws, ViewMap.load())
+
+        expected = _near_misses_the_slow_way(index)
+        actual = {
+            key: [(nm.other, tuple(sorted(nm.other_views)), nm.reason)
+                  for nm in entry.near_misses]
+            for key, entry in index.entries.items() if entry.near_misses
+        }
+        assert actual == expected
