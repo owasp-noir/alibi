@@ -13,12 +13,13 @@ near miss before it is allowed to become a finding.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from .collect import RawEndpoint
-from .cover import Coverage
+from .cover import Coverage, KeySet
 from .normalize import Key, Normalized, normalize
 from .views import TechView, ViewMap
 
@@ -121,6 +122,8 @@ class Index:
     # the answer is expensive: every code endpoint against every routing rule.
     _coverage_stats: dict[str, dict[str, tuple[int, int, int]]] = field(
         default_factory=dict, repr=False)
+    # Memo for `key_set`, on the same grounds.
+    _key_sets: dict[str, KeySet] = field(default_factory=dict, repr=False)
 
     def by_view(self, view: str) -> list[Entry]:
         return [e for e in self.entries.values() if view in e.views]
@@ -150,6 +153,18 @@ class Index:
     def keys_in(self, view: str) -> list[Key]:
         return [e.key for e in self.entries.values() if view in e.views]
 
+    def key_set(self, view: str) -> KeySet:
+        """The keys of a view, indexed for "does this rule reach any of them".
+
+        Asked once per gateway rule, and each answer used to cost a pass over
+        every code endpoint: every rule against every key. With the keys
+        indexed once per scan, a plain rule is a set lookup.
+        """
+        found = self._key_sets.get(view)
+        if found is None:
+            found = KeySet(self.keys_in(view))
+            self._key_sets[view] = found
+        return found
 
     def population(self, view: str) -> int:
         return sum(1 for e in self.entries.values() if view in e.views)
@@ -310,18 +325,46 @@ def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
 # many different paths beneath it: Argo CD's `/api` has 106.
 MOUNT_THRESHOLD = 3
 
+# The two tokens normalization leaves for a parameter: one segment, or the
+# rest of the path.
+_PLACEHOLDERS = frozenset({"{}", "*"})
+
 
 def _find_near_misses(index: Index) -> None:
     """Flag lone entries that look like a failed match rather than a real gap."""
     by_path: dict[str, list[Entry]] = defaultdict(list)
-    by_shape: dict[tuple[str, int], list[Entry]] = defaultdict(list)
+    # Every entry, filed once per segment position under the path with that
+    # position blanked. Two paths that differ in exactly one segment share a
+    # bucket -- and only those do -- so a lone entry's candidates are looked
+    # up rather than searched for. Bucketing on (method, segment count)
+    # instead put every four-segment GET in one bucket, and the search was
+    # every lone entry against every entry of the same shape: 749,000
+    # comparisons at 5,000 endpoints, four times that at 10,000.
+    #
+    # A near miss needs a parameter on at least one side of the differing
+    # segment, so entries with a parameter there are filed separately: a
+    # literal segment only ever has to be compared against those. Without
+    # the split, `/api/v1/users/{}` was compared against every other
+    # collection's item path -- all literal, none a match.
+    Slot = tuple[str, int, tuple[str, ...]]
+    by_slot: dict[Slot, list[Entry]] = defaultdict(list)
+    by_slot_param: dict[Slot, list[Entry]] = defaultdict(list)
+    # Insertion order of the index, so the candidates a lookup returns can be
+    # appended in the order the search used to find them.
+    position: dict[int, int] = {}
 
-    for entry in index.entries.values():
+    for order, entry in enumerate(index.entries.values()):
         by_path[entry.key.path].append(entry)
-        segments = entry.key.path.count("/")
-        by_shape[(entry.key.method, segments)].append(entry)
+        position[id(entry)] = order
+        pieces = entry.key.path.split("/")
+        for i, piece in enumerate(pieces):
+            slot = (entry.key.method, i, tuple(pieces[:i] + pieces[i + 1:]))
+            by_slot[slot].append(entry)
+            if piece in _PLACEHOLDERS:
+                by_slot_param[slot].append(entry)
 
     _find_siblings(index, by_path)
+    tree = _PathTree(index)
 
     for entry in index.entries.values():
         if len(entry.views) != 1:
@@ -332,20 +375,53 @@ def _find_near_misses(index: Index) -> None:
         # position where one side has a parameter and the other has a literal.
         # That is the signature of a parameter noir could not see -- or of a
         # captured request whose concrete value was never templated.
-        segments = entry.key.path.count("/")
-        for other in by_shape[(entry.key.method, segments)]:
-            if other is entry or other.views <= mine:
-                continue
+        pieces = entry.key.path.split("/")
+        candidates: dict[int, Entry] = {}
+        for i, piece in enumerate(pieces):
+            slot = (entry.key.method, i, tuple(pieces[:i] + pieces[i + 1:]))
+            pool = by_slot if piece in _PLACEHOLDERS else by_slot_param
+            for other in pool[slot]:
+                if other is entry or other.views <= mine:
+                    continue
+                candidates[id(other)] = other
+        for other in sorted(candidates.values(), key=lambda e: position[id(e)]):
             reason = _one_segment_apart(entry.key.path, other.key.path)
             if reason:
                 entry.near_misses.append(NearMiss(other.key, other.views, reason))
 
-        mount = _looks_like_a_mount(entry, index)
+        mount = _looks_like_a_mount(entry, tree)
         if mount:
             entry.near_misses.append(mount)
 
 
-def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
+class _PathTree:
+    """Every entry, sorted by path, so what lies beneath a prefix is a slice.
+
+    Mount detection asks, for each lone entry, which entries live beneath its
+    path. Asked by walking the whole index it cost every lone entry a pass
+    over every entry -- 2.2 million prefix tests on authentik's 1,500
+    endpoints, and a scan of 20,000 synthetic ones spent twenty seconds in
+    that loop alone. Sorted, the entries beneath a prefix are contiguous, and
+    a binary search lands on the first of them.
+    """
+
+    def __init__(self, index: Index) -> None:
+        ordered = sorted(index.entries.values(), key=lambda e: e.key.path)
+        self._paths = [entry.key.path for entry in ordered]
+        self._entries = ordered
+
+    def beneath(self, prefix: str) -> list[Entry]:
+        """Entries whose path starts with `prefix` -- a directory, not a stem."""
+        start = bisect_left(self._paths, prefix)
+        found = []
+        for i in range(start, len(self._paths)):
+            if not self._paths[i].startswith(prefix):
+                break
+            found.append(self._entries[i])
+        return found
+
+
+def _looks_like_a_mount(entry: Entry, tree: _PathTree) -> NearMiss | None:
     """Detect a registration that stands in for everything beneath it.
 
     Frameworks that hand a whole subtree to another router -- a gRPC gateway,
@@ -366,11 +442,9 @@ def _looks_like_a_mount(entry: Entry, index: Index) -> NearMiss | None:
     beneath: set[str] = set()
     paths: set[str] = set()
     segments: set[str] = set()
-    for other in index.entries.values():
-        if other is entry or other.key.path == entry.key.path:
-            continue
-        if not other.key.path.startswith(prefix + "/"):
-            continue
+    # Nothing at the prefix itself is beneath it: the entry's own path, and
+    # any other verb on it, fall outside the slice by construction.
+    for other in tree.beneath(prefix + "/"):
         if other.views <= entry.views:
             continue
         beneath |= other.views
@@ -432,12 +506,11 @@ def _one_segment_apart(left: str, right: str) -> str | None:
 
     i = differing[0]
     a, b = lhs[i], rhs[i]
-    placeholders = {"{}", "*"}
-    if a in placeholders and b not in placeholders:
+    if a in _PLACEHOLDERS and b not in _PLACEHOLDERS:
         return f"segment {i} is a parameter here, the literal {b!r} there"
-    if b in placeholders and a not in placeholders:
+    if b in _PLACEHOLDERS and a not in _PLACEHOLDERS:
         return f"segment {i} is the literal {a!r} here, a parameter there"
-    if {a, b} == placeholders:
+    if {a, b} == _PLACEHOLDERS:
         # One side swallows the rest of the path and the other takes a single
         # segment. That is not two endpoints -- it is the same slot read at two
         # granularities, which is what happens every time a framework's

@@ -104,6 +104,36 @@ Notable changes to alibi. The format follows
   trimmed from the front, which on real absolute paths spent the whole budget
   on one path and dropped `file too large (12.35MB > 10.0MB)` -- the one fact
   explaining why a view is missing.
+- Scanning an unchanged repository twice gives the same report twice. The five
+  view scans were read in the order they finished, so which of a finding's
+  source files was reported as its location came down to a race between five
+  noir processes, and the view counts were accumulated from a set, whose order
+  follows the interpreter's hash seed. 0.1.0 produced four distinct reports in
+  five scans of kong. Which findings are reported, at what severity and in
+  what order, is unchanged -- the views are now read in the order they were
+  submitted, which puts the code view first, so a finding is located in the
+  code that implements it rather than in whichever contract or gateway file
+  happened to arrive first.
+
+### Performance
+
+- Large scans are no longer super-linear. Mount detection compared every lone
+  endpoint against every other endpoint, the near-miss search compared it
+  against every endpoint of the same verb and depth, and every routing
+  question ran a glob matcher over every rule or every endpoint -- so the cost
+  grew with the square of the scan. Near misses are found by lookup, and
+  routing questions are answered from a trie of path segments. A synthetic
+  scan of 20,000 endpoints spent 62 s below the collection step and now spends
+  0.9 s; 50,000 went from 8 minutes to 2.7 s. On the twelve repositories
+  measured this is not what you feel: noir is 95% or more of every one of
+  them, and alibi's own share is already under a tenth of a second.
+- `REVIEW` collects the entries it lists by identity rather than by searching
+  the list it is building, which was quadratic in the number of uncertain
+  findings.
+- Startup imports the report module the run asked for, and reads the installed
+  version only when something wants it. `alibi scan` of an empty directory
+  went from 192 ms to 180 ms. It is under 1% of a scan of any real repository,
+  and shows up only in a CI loop over many small sources.
 
 ## [0.1.0] - 2026-08-30
 

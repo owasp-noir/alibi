@@ -5,13 +5,15 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import __version__, collect, snapshot
+from . import collect, snapshot
 from .ignore import IgnoreError, IgnoreList
 from .index import build as build_index
-from .report import history as history_report
-from .report import json_report, sarif, text
 from .rules import RuleSet
 from .views import ViewMap
+
+# The report modules are imported where a format is chosen, not here. Only
+# one of the three ever runs, `sarif` pulls importlib.metadata behind it, and
+# `history` is reached by one subcommand out of three.
 
 EXIT_OK = 0
 EXIT_FINDINGS = 1
@@ -32,6 +34,38 @@ def split_passthrough(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv[:cut], argv[cut + 1:]
 
 
+def _reporter(fmt: str):
+    """The one report module this run will use.
+
+    Importing all three costs every scan the two it will not call. `sarif`
+    is the expensive one -- it reads the installed version, which imports
+    importlib.metadata, 19 ms on its own.
+    """
+    if fmt == "json":
+        from .report import json_report
+        return json_report
+    if fmt == "sarif":
+        from .report import sarif
+        return sarif
+    from .report import text
+    return text
+
+
+class _PrintVersion(argparse.Action):
+    """`--version`, without reading the version until it is asked for.
+
+    argparse's built-in `version` action takes the string when the parser is
+    built, which imports importlib.metadata on every run -- see the module
+    docstring in `alibi/__init__.py`.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import __version__
+
+        print(f"alibi {__version__}")
+        parser.exit()
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     argv, passthrough = split_passthrough(argv)
@@ -41,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Cross-check the views of your attack surface and find the "
                     "endpoints that cannot corroborate each other.",
     )
-    parser.add_argument("--version", action="version",
-                        version=f"alibi {__version__}")
+    parser.add_argument("--version", action=_PrintVersion, nargs=0,
+                        help="show program's version number and exit")
     sub = parser.add_subparsers(dest="command", required=True)
 
     scan = sub.add_parser("scan", help="scan sources and report where the views disagree")
@@ -119,6 +153,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _scan(args) -> int:
+    # Before noir runs, for the same reason the ignore list is checked here:
+    # only one of the three report modules is ever used, and `sarif` drags
+    # importlib.metadata in behind it -- but resolving it after the scan
+    # would mean a broken install failed only once the scan had been paid
+    # for. Imported late, and still before anything expensive.
+    report = _reporter(args.format)
+
     view_map = ViewMap.load(args.views)
     rules = RuleSet.load(args.rules)
 
@@ -155,13 +196,13 @@ def _scan(args) -> int:
     findings, suppressed = ignores.apply(findings)
 
     if args.format == "json":
-        print(json_report.dump(index, findings, skipped, names, errors,
-                               suppressed, rules, args.endpoints))
+        print(report.dump(index, findings, skipped, names, errors,
+                          suppressed, rules, args.endpoints))
     elif args.format == "sarif":
-        print(sarif.dump(index, findings, skipped, names, rules, errors,
-                         suppressed))
+        print(report.dump(index, findings, skipped, names, rules, errors,
+                          suppressed))
     else:
-        text.render(index, findings, skipped, rules, names, errors, suppressed)
+        report.render(index, findings, skipped, rules, names, errors, suppressed)
 
     # After the report: a snapshot that cannot be written should not cost the
     # user the scan they just paid for.
@@ -180,6 +221,8 @@ def _scan(args) -> int:
 def _history(args) -> int:
     # The ruleset is loaded for its severity ladder alone: a snapshot records
     # the severity a finding was reported at, not where that rung sits.
+    from .report import history as history_report
+
     severities = RuleSet.load().severities
     history_report.render(snapshot.history(args.path), severities)
     return EXIT_OK
@@ -197,6 +240,8 @@ def _doctor(args) -> int:
     noir_bin = collect.find_noir(args.noir_bin)
     found = collect.require_version(noir_bin)
     catalog = collect.list_techs(noir_bin)
+
+    from . import __version__
 
     reported = ".".join(str(part) for part in found) if found else "not reported"
     print(f"alibi:        {__version__}")

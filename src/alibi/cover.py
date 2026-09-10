@@ -32,6 +32,17 @@ def segments(path: str) -> list[str]:
     return [s for s in path.split("/") if s != ""]
 
 
+def _plain_pattern(parts: list[str]) -> bool:
+    """Does this pattern match only itself, segment for segment?
+
+    A rule path with no placeholder anywhere -- no `*` segment, no `{}` in
+    any segment -- reaches a path exactly when the segments are equal, or
+    when it is a prefix of them. That is a set lookup, and it is what nearly
+    every gateway rule is.
+    """
+    return all(part != _MANY and _ONE not in part for part in parts)
+
+
 def matches(pattern: str, path: str) -> bool:
     """Does `pattern` describe `path`, treating `{}` and `*` as placeholders?
 
@@ -119,6 +130,26 @@ class Rule:
         return False
 
 
+class _Node:
+    """One segment deep in a trie of paths, and what ends or passes here."""
+
+    __slots__ = ("children", "ends", "beneath")
+
+    def __init__(self) -> None:
+        self.children: dict[str, _Node] = {}
+        # Methods of the rules or keys whose path ends exactly here.
+        self.ends: set[str] = set()
+        # Coverage: methods of the prefix rules ending here, which reach every
+        # path that passes through. KeySet: methods of every key at or below
+        # here, which is what a prefix rule passing through reaches.
+        self.beneath: set[str] = set()
+
+
+def _reaches_any(methods: set[str], wanted: set[str] | None) -> bool:
+    """`wanted` is None for a rule on any verb, which reaches every method."""
+    return bool(methods) if wanted is None else not methods.isdisjoint(wanted)
+
+
 class Coverage:
     """The routing rules from one predicate view.
 
@@ -127,11 +158,41 @@ class Coverage:
     evidence to offer: the question "which endpoints does this reach" has
     the same answer for every endpoint, so an absence from it is not a
     signal. `selective` is how a rule that reasons from absence asks.
+
+    Asked once per code endpoint by three different callers -- the coverage
+    statistics, the "no gateway reaches this" rule, and the check that the
+    views connected at all -- so every answer is kept. And the rules without
+    a placeholder, which is nearly all of them, are held in a trie keyed by
+    segment, so a path is answered by walking its own segments rather than by
+    running the glob matcher over every rule. At 5,000 synthetic endpoints
+    the matcher was called 1.2 million times; the pattern rules that still
+    need it are a handful.
     """
 
     def __init__(self, rules: list[Rule], catch_alls: int = 0) -> None:
         self._rules = rules
         self.catch_alls = catch_alls
+        self._answers: dict[Key, bool] = {}
+        self._root = _Node()
+        self._patterned: list[Rule] = []
+        for rule in rules:
+            # A catch-all reaches nothing, so it goes into neither half of
+            # the index. `from_entries` already keeps these out of `rules`;
+            # this is for a Coverage built directly, which must still answer
+            # exactly what `Rule.reaches` answers.
+            if rule.key.catch_all:
+                continue
+            parts = segments(rule.key.path)
+            if not _plain_pattern(parts):
+                self._patterned.append(rule)
+                continue
+            node = self._root
+            for part in parts:
+                node = node.children.setdefault(part, _Node())
+            if rule.prefix:
+                node.beneath.add(rule.key.method)
+            else:
+                node.ends.add(rule.key.method)
 
     @classmethod
     def from_entries(cls, entries, view: str) -> Coverage:
@@ -155,10 +216,81 @@ class Coverage:
         return bool(self._rules)
 
     def reaching(self, target: Key) -> Rule | None:
+        """Which rule reaches this, if any. Linear; `covers` is the fast ask."""
         for rule in self._rules:
             if rule.reaches(target):
                 return rule
         return None
 
     def covers(self, target: Key) -> bool:
-        return self.reaching(target) is not None
+        answer = self._answers.get(target)
+        if answer is None:
+            answer = self._covers(target)
+            self._answers[target] = answer
+        return answer
+
+    def _covers(self, target: Key) -> bool:
+        wanted = {WILDCARD_METHOD, target.method}
+        # Every rule path the target's segments could be spelling. One node
+        # until a `{}` in the target, which matches any rule segment and so
+        # fans out to every child -- the same reading `_match` gives it.
+        nodes = [self._root]
+        for part in segments(target.path):
+            if any(not node.beneath.isdisjoint(wanted) for node in nodes):
+                return True
+            if part == _ONE:
+                nodes = [child for node in nodes for child in node.children.values()]
+            else:
+                nodes = [child for node in nodes
+                         if (child := node.children.get(part)) is not None]
+            if not nodes:
+                break
+        if any(not (node.ends | node.beneath).isdisjoint(wanted) for node in nodes):
+            return True
+        return any(rule.reaches(target) for rule in self._patterned)
+
+
+class KeySet:
+    """The endpoint keys of one view, arranged to answer what a rule reaches.
+
+    The mirror of `Coverage`: there a path asks which rules reach it, here a
+    rule asks whether it reaches anything. The keys sit in a trie keyed by
+    segment, and a rule without a placeholder walks it -- following both the
+    literal child and the `{}` child at each step, because a parameter in a
+    key path matches any rule segment -- and asks whether a key ends where it
+    stops, or lies anywhere beneath.
+    """
+
+    def __init__(self, keys: list[Key]) -> None:
+        self._keys = keys
+        self._root = _Node()
+        for key in keys:
+            node = self._root
+            node.beneath.add(key.method)
+            for part in segments(key.path):
+                node = node.children.setdefault(part, _Node())
+                node.beneath.add(key.method)
+            node.ends.add(key.method)
+
+    def reached_by(self, rule: Rule) -> bool:
+        # The same rule as in `Coverage`, from the other side: a catch-all
+        # reaches nothing, so it reaches nothing here either.
+        if rule.key.catch_all:
+            return False
+        parts = segments(rule.key.path)
+        if not _plain_pattern(parts):
+            return any(rule.reaches(key) for key in self._keys)
+
+        wanted = None if rule.key.method == WILDCARD_METHOD else {rule.key.method}
+        nodes = [self._root]
+        for part in parts:
+            nodes = [child for node in nodes
+                     for child in (node.children.get(part), node.children.get(_ONE))
+                     if child is not None]
+            if not nodes:
+                return False
+        # No `base in ("", "/")` guard here or in `Coverage`: a rule whose
+        # path is bare `/` is a catch-all and returned above.
+        return any(_reaches_any(node.ends, wanted)
+                   or (rule.prefix and _reaches_any(node.beneath, wanted))
+                   for node in nodes)

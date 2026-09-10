@@ -88,3 +88,43 @@ def test_a_partly_literal_segment_still_matches():
     """Route templates put more than one slot in a segment: `/{z}-{x}-{y}`."""
     assert matches("/tiles/{}-{}", "/tiles/12-34")
     assert not matches("/tiles/{}-{}", "/tiles/1234")
+
+
+def _brute_covers(rules, target):
+    return any(rule.reaches(target) for rule in rules)
+
+
+def _random_parts(rng):
+    """A path or pattern in the vocabulary normalization produces."""
+    pool = ["api", "v1", "users", "{}", "*", "a-{}", "{}-{}", "x", "*x", ".", ""]
+    return [rng.choice(pool) for _ in range(rng.randint(0, 4))]
+
+
+def test_indexed_coverage_agrees_with_the_matcher():
+    """`Coverage` and `KeySet` answer by lookup where they can.
+
+    The lookups are only a shortcut if they say exactly what running
+    `Rule.reaches` over every rule would have said, placeholders, partial
+    segments, verbs and root rules included. Random paths over the tokens
+    normalization emits, checked both ways.
+    """
+    import random
+
+    from alibi.cover import Coverage, KeySet
+
+    rng = random.Random(7)
+    methods = ["GET", "POST", "ANY"]
+    for _ in range(2000):
+        rules = [
+            Rule(key=Key(rng.choice(methods), "/" + "/".join(_random_parts(rng))),
+                 view="gateway", prefix=rng.random() < 0.8)
+            for _ in range(rng.randint(0, 6))
+        ]
+        targets = [Key(rng.choice(methods[:2]), "/" + "/".join(_random_parts(rng)))
+                   for _ in range(rng.randint(0, 8))]
+        coverage = Coverage(rules)
+        for target in targets:
+            assert coverage.covers(target) == _brute_covers(rules, target), (rules, target)
+        keys = KeySet(targets)
+        for rule in rules:
+            assert keys.reached_by(rule) == any(rule.reaches(k) for k in targets), (rule, targets)

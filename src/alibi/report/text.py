@@ -56,9 +56,11 @@ def render(
     def out(line=""):
         print(line, file=stream)
 
+    # Sorted, so the order the views are listed in does not depend on the
+    # interpreter's hash seed: `entry.views` is a set.
     view_counts: dict[str, int] = {}
     for entry in index.entries.values():
-        for view in entry.views:
+        for view in sorted(entry.views):
             view_counts[view] = view_counts.get(view, 0) + 1
 
     out()
@@ -434,9 +436,16 @@ def _render_near_misses(findings: list[Finding], paint: Painter, out) -> None:
     Whole-scan doubt is still reported: the near-miss count beside the totals
     is the tool's error bar over everything it compared, findings or not.
     """
+    # By identity: every finding on one endpoint carries the same Entry
+    # object, and the index never holds two entries for one key. Asking the
+    # list compared each entry against every one already flagged, field by
+    # field -- at 20,000 synthetic endpoints, 1.6 of the 1.8 seconds the
+    # whole post-scan pipeline took.
     flagged: list[Entry] = []
+    seen: set[int] = set()
     for finding in findings:
-        if finding.uncertain and finding.entry not in flagged:
+        if finding.uncertain and id(finding.entry) not in seen:
+            seen.add(id(finding.entry))
             flagged.append(finding.entry)
     if not flagged:
         return

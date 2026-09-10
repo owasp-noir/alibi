@@ -396,7 +396,7 @@ class RuleSet:
             # endpoint key.
             target = when["covers_nothing_in"]
             reach = CoverRule(key=entry.key, view="", prefix=True)
-            if any(reach.reaches(key) for key in index.keys_in(target)):
+            if index.key_set(target).reached_by(reach):
                 return False
 
         if "catch_all" in when and entry.key.catch_all != bool(when["catch_all"]):
