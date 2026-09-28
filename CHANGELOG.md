@@ -48,6 +48,14 @@ Notable changes to alibi. The format follows
 
 ### Fixed
 
+- `--noir-arg` and a bare `--` refuse flags that would make a scan look
+  clean for the wrong reason: `-f` / `--format` (breaks the JSON alibi
+  parses), `--diff-ref` / `--diff-path` (Diff Mode), `--no-log` /
+  `--nolog`, and `--only-techs` / `--exclude-techs` (collapse alibi's
+  per-view detector pools). Harmless passthrough such as `--exclude-path`,
+  `--concurrency`, and `--tls-skip-verify` is unchanged. Exit status 2,
+  with the flag and the reason named before any noir process starts.
+
 - `--views` and `--rules` crashed before noir ran: both loaders were written
   for a `Path` and both flags hand them a string.
 - A gateway made of nothing but a catch-all holds `UNEXPOSED` back and says

@@ -45,6 +45,95 @@ class NoirTooOld(RuntimeError):
     pass
 
 
+class DangerousNoirArg(ValueError):
+    """A `--noir-arg` / bare `--` flag that would silently break a scan."""
+
+
+# Flags that must not reach noir through alibi's passthrough. Each one either
+# replaces the `-f json` document alibi parses, switches Diff Mode (so the
+# document is no longer an endpoint list), or overrides the per-view
+# `--only-techs` lists that keep corroboration intact. Harmless filters such
+# as `--exclude-path`, `--concurrency`, or `--tls-skip-verify` stay allowed.
+_DANGEROUS_NOIR_ARGS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("--diff-ref",),
+        "switches noir into Diff Mode, so stdout is a diff rather than the "
+        "endpoints JSON alibi parses -- a scan that looks clean for the wrong "
+        "reason",
+    ),
+    (
+        ("--diff-path",),
+        "switches noir into Diff Mode, so stdout is a diff rather than the "
+        "endpoints JSON alibi parses -- a scan that looks clean for the wrong "
+        "reason",
+    ),
+    (
+        ("-f", "--format"),
+        "overrides the `-f json` document alibi parses on stdout; anything "
+        "else leaves the scan looking empty",
+    ),
+    (
+        ("--no-log", "--nolog"),
+        "risks suppressing the JSON document alibi reads from stdout, which "
+        "would report a clean, empty scan",
+    ),
+    (
+        ("--only-techs",),
+        "overrides the per-view `--only-techs` lists alibi builds so "
+        "corroboration survives; forwarding it collapses those scans into "
+        "one detector pool",
+    ),
+    (
+        ("--exclude-techs",),
+        "strips technologies from noir's result after detection, undoing the "
+        "per-view isolation alibi relies on",
+    ),
+)
+
+
+def refuse_dangerous_noir_args(extra_args: list[str] | None) -> None:
+    """Refuse passthrough flags that would make a scan look clean for free.
+
+    Called before any noir process starts: discovering the conflict after a
+    multi-view scan has already run is the exact silent failure this exists
+    to prevent.
+    """
+    for token in extra_args or []:
+        name = _flag_name(token)
+        if not name:
+            continue
+        for names, reason in _DANGEROUS_NOIR_ARGS:
+            if name not in names:
+                continue
+            if name.startswith("--") or len(names) == 1:
+                shown = name
+            else:
+                # Short form: name the long option too so the message greps.
+                shown = f"{name} / {names[-1]}"
+            raise DangerousNoirArg(
+                f"refusing {shown} in noir passthrough: {reason}"
+            )
+
+
+def _flag_name(token: str) -> str:
+    """The option name in one argv token, or "" when it is not a flag.
+
+    Understands `--long`, `--long=value`, `-f`, `-f=value`, and `-fvalue`.
+    A following value token (`yaml` after `--format`) is not a flag.
+    """
+    if token.startswith("--"):
+        return token.split("=", 1)[0]
+    if token.startswith("-") and len(token) > 1 and token[1] != "-":
+        body = token[1:]
+        if "=" in body:
+            return "-" + body.split("=", 1)[0]
+        # `-f` alone, or `-fjson` with the value glued on. Only `-f` is on
+        # the denylist among short options, so reading the first letter is
+        # enough; clusters like `-abc` are not something noir accepts.
+        return "-" + body[0]
+    return ""
+
+
 # `noir list techs` is a v1.0.0 subcommand -- before it, the catalog was read
 # with `--list-techs`, and v1 only keeps that spelling as a silent alias going
 # the other way. Since the catalog is what assigns every technology to a view,
