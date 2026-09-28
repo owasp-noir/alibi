@@ -73,11 +73,6 @@ _DANGEROUS_NOIR_ARGS: tuple[tuple[tuple[str, ...], str], ...] = (
         "else leaves the scan looking empty",
     ),
     (
-        ("--no-log", "--nolog"),
-        "risks suppressing the JSON document alibi reads from stdout, which "
-        "would report a clean, empty scan",
-    ),
-    (
         ("--only-techs",),
         "overrides the per-view `--only-techs` lists alibi builds so "
         "corroboration survives; forwarding it collapses those scans into "
@@ -346,9 +341,10 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
     """Run one noir scan and return its endpoints.
 
     Noir writes its logs to stderr and the JSON document to stdout, so the two
-    never need separating here. `--nolog` is deliberately not passed: it
-    suppresses the `-f json` document along with the logs, which would leave
-    this function parsing an empty string and reporting a clean, empty scan.
+    never need separating here. `--no-log` is safe to forward (it only quiets
+    the logger; the `-f json` document still lands on stdout), but alibi does
+    not pass it itself -- stderr from noir stays available for diagnosis when
+    a view scan fails.
     """
     # `-T` runs noir's taggers. They are off by default there, and alibi's
     # whole severity ladder is built on what they find: whether an endpoint
