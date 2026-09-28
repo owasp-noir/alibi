@@ -92,6 +92,11 @@ TWO SURFACES?
 Groups stop at twelve — the ordering is worst-first, so the tail is the least
 informative part, and `-f json` has all of it.
 
+Flags for noir go after a bare `--` or through `--noir-arg`. Filters such as
+`--exclude-path` are fine; flags that would replace the JSON contract or
+collapse alibi's per-view scans (`--format`, `--diff-*`, `--only-techs`, …)
+are refused with exit status 2.
+
 ### In CI
 
 ```yaml

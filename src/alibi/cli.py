@@ -96,7 +96,9 @@ def main(argv: list[str] | None = None) -> int:
                       help="one argument passed through to noir; repeatable. "
                            "A value starting with a dash needs the joined form, "
                            "--noir-arg=--exclude-path=..., or put it after a "
-                           "bare -- instead")
+                           "bare -- instead. Flags that break the JSON "
+                           "contract or alibi's per-view scans "
+                           "(--format, --diff-*, --only-techs, ...) are refused")
     scan.add_argument("--endpoints", action="store_true",
                       help="with -f json, list what every view held. Large "
                            "-- on a big repository several times the rest of "
@@ -129,6 +131,15 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_ERROR
         args.noir_arg = list(args.noir_arg) + passthrough
 
+    # Before any scan: a conflicting noir flag would otherwise run five
+    # view scans and then look clean for the wrong reason.
+    if getattr(args, "noir_arg", None):
+        try:
+            collect.refuse_dangerous_noir_args(args.noir_arg)
+        except collect.DangerousNoirArg as exc:
+            print(f"alibi: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+
     # A flag that silently does nothing is worse than one that is refused:
     # the reader waits for a scan, greps the output for the lists, and finds
     # neither them nor any reason they are missing.
@@ -146,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "history":
             return _history(args)
     except (collect.NoirNotFound, collect.NoirFailed, collect.NoirTooOld,
-            snapshot.SnapshotError, IgnoreError) as exc:
+            collect.DangerousNoirArg, snapshot.SnapshotError, IgnoreError) as exc:
         print(f"alibi: {exc}", file=sys.stderr)
         return EXIT_ERROR
     return EXIT_ERROR
