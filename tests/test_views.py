@@ -10,7 +10,7 @@ def test_every_non_language_tech_is_placed_by_hand():
     disappears from the comparison.
     """
     view_map = ViewMap.load()
-    assert len(view_map.mapped_techs) == 48
+    assert len(view_map.mapped_techs) == 49
 
 
 def test_language_analyzers_fall_through_to_code():
@@ -37,7 +37,11 @@ def test_captures_and_collections_are_told_apart():
     assert view_map.lookup("mitmproxy").observed is True
     assert view_map.lookup("postman").observed is False
     assert view_map.lookup("insomnia").observed is False
+    assert view_map.lookup("http_file").observed is False
+    assert view_map.lookup("graphql_operation").observed is False
     assert view_map.lookup("postman").view == "traffic"
+    assert view_map.lookup("graphql_operation").view == "traffic"
+    assert view_map.lookup("graphql_sdl").view == "doc"
 
 
 def test_schema_driven_platforms_count_as_implementation():
