@@ -19,6 +19,13 @@ Notable changes to alibi. The format follows
 
 ### Added
 
+- `graphql_operation` on the traffic view as curated. Noir v1.4 registered
+  the former GraphQL-operation file hook as a real technology (#2702); without
+  a line here `alibi doctor` and the noir-integration job treated it as code.
+  Operation documents (`query Foo { … }` in `.graphql` / `.gql`) are client
+  requests, not the SDL schema `graphql_sdl` already maps under doc — same
+  class as `.http` files and Postman collections.
+
 - `alibi scan -f json --endpoints` lists what every view actually held:
   method, path, protocol, which views vouched for it, the technologies
   behind it, the spelling before normalization, and the files. Without it,

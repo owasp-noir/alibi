@@ -8,7 +8,7 @@
 #
 # Only technologies that are NOT a programming language need a line here: noir
 # reports a `language` field for those 205, and every one of them describes code
-# that actually runs. Everything else -- the 48 entries below -- is a document,
+# that actually runs. Everything else -- the 49 entries below -- is a document,
 # a capture, or a piece of routing configuration, and has to be placed by hand.
 #
 # When noir adds a language, this file needs no change. When noir adds a
@@ -61,6 +61,13 @@ techs:
   insomnia: { view: traffic, kind: curated }
   bruno: { view: traffic, kind: curated }
   http_file: { view: traffic, kind: curated }
+  # Client GraphQL operation documents (`query Foo { … }` in `.graphql` /
+  # `.gql`). Distinct from `graphql_sdl` (the server schema contract under
+  # doc): these are requests a client wrote down, same class as `.http` files
+  # and Postman collections. Noir registered the tech in v1.4 (#2702); before
+  # that the analyzer was a file hook with `technology: null` and never
+  # reached the view map.
+  graphql_operation: { view: traffic, kind: curated }
 
   # --- gateway: reachable from outside ----------------------------------
   nginx: gateway
