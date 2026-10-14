@@ -617,10 +617,18 @@ def test_a_ruleset_value_that_would_fail_mid_scan_fails_at_load(tmp_path):
     assert RuleSet.load(str(empty)).adjustments == []
 
 
-def test_fail_on_accepts_a_custom_ladders_own_rung(tmp_path):
-    from alibi.cli import EXIT_OK, main
+def test_fail_on_accepts_a_custom_ladders_own_rung(tmp_path, capsys, monkeypatch):
+    """argparse offered only the default five, so `severe` was a usage error."""
+    from alibi import collect
+    from alibi.cli import main
 
+    def stop(_):
+        raise collect.NoirNotFound("past the severity check")
+
+    # Stops just after the check, with or without a noir on this machine.
+    monkeypatch.setattr(collect, "find_noir", stop)
     ladder = tmp_path / "rules.yml"
     ladder.write_text("severities: [minor, severe]\nrules: []\n")
-    assert main(["scan", str(tmp_path), "--rules", str(ladder),
-                 "--fail-on", "severe", "-f", "json"]) == EXIT_OK
+
+    main(["scan", str(tmp_path), "--rules", str(ladder), "--fail-on", "severe"])
+    assert "past the severity check" in capsys.readouterr().err
