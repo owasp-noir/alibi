@@ -155,8 +155,10 @@ Notable changes to alibi. The format follows
   longer fails a CI gate. Each `scan_errors` entry says which it was.
 - Mistakes in what the user supplies are reported, not raised: a
   non-executable `--noir-bin`, an unreadable or malformed `--rules` or
-  `--views`, an unknown condition (found before the scan, not after it), a
-  rule severity off its ladder, and a `--fail-on` the ladder does not have.
+  `--views`, an unknown condition, an invalid regex, a missing `when`, a
+  non-integer shift (all found before the scan, not after it), a rule
+  severity off its ladder, and a `--fail-on` the ladder does not have.
+  `--fail-on` now accepts a custom ladder's own rungs.
 - An `.alibi.yml` entry with an unknown key, or no path, rule or view, is an
   error. It used to be read and discarded, so the suppression was not there.
 - `--snapshot` no longer fails when one path is served on two protocols. The
