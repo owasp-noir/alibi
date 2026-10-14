@@ -465,3 +465,23 @@ def test_two_scans_a_second_apart_are_still_told_apart(tmp_path, endpoint, view_
 
     assert history.current_at == history.previous_at == same_second
     assert (history.current_scan, history.previous_scan) == (2, 1)
+
+
+def test_one_path_on_two_protocols_is_recorded_not_refused(db, view_map):
+    """The index keys on protocol and the history does not.
+
+    An HTTP `GET /socket` and a WebSocket one are two entries, and wrote the
+    same sighting row twice -- a primary-key failure reported as "not a
+    readable alibi snapshot", on a database that had just been created.
+    """
+    from alibi.collect import RawEndpoint
+
+    index = build([
+        RawEndpoint(url="/socket", method="GET", technology="js_express", source="s"),
+        RawEndpoint(url="/socket", method="GET", technology="js_express", source="s",
+                    protocol="ws"),
+    ], view_map)
+
+    snapshot.record(db, index, [], ["s"], [], when=DAY1)
+
+    assert snapshot.timeline(db, "GET", "/socket").first_seen == {"code": DAY1}

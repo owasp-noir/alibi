@@ -97,6 +97,36 @@ def test_a_single_file_is_a_source(tmp_path):
     assert not staged.exists()
 
 
+def test_a_file_source_is_reported_where_it_lives_not_where_it_was_staged(tmp_path):
+    """The staging directory is gone by the time anyone reads the report.
+
+    Noir names the file it read, and for a file source that is the staged
+    copy -- so every finding on a HAR or an OpenAPI document passed by name
+    pointed at `/var/folders/.../alibi-x1y2/prod.har`, a path that no longer
+    existed, in the terminal and as the SARIF location.
+    """
+    script = tmp_path / "fake-noir"
+    # $2 is the `-b` argument: the staging directory.
+    script.write_text(
+        "#!/bin/sh\n"
+        "printf '{\"endpoints\": [{\"url\": \"/x\", \"method\": \"GET\", "
+        "\"details\": {\"technology\": \"har\", \"code_paths\": "
+        "[{\"path\": \"%s/prod.har\"}]}}]}' \"$2\"\n"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    target = captures / "prod.har"
+    target.write_text("{}")
+
+    with collect.scannable(collect.Source(str(target))) as ready:
+        result = collect.scan(ready, str(script))
+
+    [found] = result.endpoints
+    assert found.code_paths[0]["path"] == str(target)
+    assert found.source_root == str(captures)
+
+
 def test_a_directory_is_passed_through_untouched(tmp_path):
     source = collect.Source(str(tmp_path))
     with collect.scannable(source) as ready:
@@ -254,3 +284,11 @@ def test_the_views_come_back_in_the_order_they_were_submitted(tmp_path, monkeypa
     )
 
     assert [e.url for e in result.endpoints] == ["/python_flask", "/oas3", "/har"]
+
+
+def test_a_noir_bin_that_cannot_be_run_is_named_not_raised(tmp_path):
+    script = tmp_path / "noir"
+    script.write_text("#!/bin/sh\n")
+
+    with pytest.raises(collect.NoirNotFound, match="not executable"):
+        collect.find_noir(str(script))

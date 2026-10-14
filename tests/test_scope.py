@@ -137,6 +137,30 @@ def test_a_directory_another_view_needs_is_never_suggested(endpoint, view_map):
     assert from_tests(findings, index) is None
 
 
+def test_a_checkout_that_lives_under_a_tests_directory_is_not_test_code(
+        endpoint, view_map):
+    """Only directories inside the scanned source say what the project ships.
+
+    Noir echoes the base path back, so a repository cloned to
+    `/home/me/tests/shop` had every file read as test code -- and the hint
+    advised `--exclude-path '**/tests/**'`, which excludes the whole scan.
+    """
+    from alibi.scope import from_tests
+
+    root = "/home/me/tests/shop"
+    endpoints = [
+        endpoint(f"/route{i}", "GET", "python_flask", source_root=root,
+                 code_paths=({"path": f"{root}/app.py", "line": i},))
+        for i in range(15)
+    ]
+    endpoints += [endpoint("/anchor", "GET", "oas3"),
+                  endpoint("/anchor", "GET", "python_flask")]
+
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index) is None
+
+
 def test_a_handful_of_test_findings_is_not_worth_a_paragraph(endpoint, view_map):
     from alibi.scope import from_tests
 

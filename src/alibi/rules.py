@@ -84,6 +84,15 @@ class Skipped:
     detail: str
 
 
+class RulesError(ValueError):
+    """A ruleset that cannot be used. Reported before noir runs, not after.
+
+    `--rules` is a hand-written file, and a mistake in it used to surface
+    as a traceback -- for a condition typo, only once every view had been
+    scanned and the first finding reached the line that used it.
+    """
+
+
 class RuleSet:
     def __init__(self, data: dict) -> None:
         self.severities: list[str] = data.get(
@@ -97,8 +106,31 @@ class RuleSet:
     def load(cls, path: str | Path | None = None) -> RuleSet:
         # `--rules` arrives as a string; see `ViewMap.load`.
         source = Path(path) if path else _RULES_FILE
-        with source.open(encoding="utf-8") as handle:
-            return cls(yaml.safe_load(handle))
+        try:
+            with source.open(encoding="utf-8") as handle:
+                data = yaml.safe_load(handle)
+        except OSError as exc:
+            raise RulesError(f"cannot read {source}: {exc.strerror or exc}") from exc
+        except yaml.YAMLError as exc:
+            raise RulesError(f"{source} is not valid YAML: {exc}") from exc
+        if not isinstance(data, dict):
+            raise RulesError(f"{source} should be a mapping with a `rules:` list")
+        ruleset = cls(data)
+        ruleset.check()
+        return ruleset
+
+    def check(self) -> None:
+        """Everything `evaluate` would trip over, asked before there is a scan."""
+        whens = [rule["when"] for rule in self.rules if rule.get("when")]
+        whens += [item["when"] for item in self.adjustments + self.suppressions]
+        for when in whens:
+            self._known(when)
+        for rule in self.rules:
+            severity = rule.get("severity", "medium")
+            if severity not in self.severities:
+                raise RulesError(
+                    f"rule {rule['id']} has severity {severity!r}, which is not "
+                    f"on the ladder ({', '.join(self.severities)})")
 
     def _shift(self, severity: str, steps: int) -> str:
         try:
@@ -371,14 +403,17 @@ class RuleSet:
         "covers_nothing_in", "thin_routing_view",
     })
 
-    def _condition(self, entry: Entry, when: dict, index: Index,
-                   rule: dict | None = None) -> bool:
+    def _known(self, when: dict) -> None:
         unknown = set(when) - self.CONDITIONS
         if unknown:
-            raise ValueError(
+            raise RulesError(
                 f"unknown condition {', '.join(sorted(unknown))} in rules.yml -- "
                 f"known conditions are {', '.join(sorted(self.CONDITIONS))}"
             )
+
+    def _condition(self, entry: Entry, when: dict, index: Index,
+                   rule: dict | None = None) -> bool:
+        self._known(when)
 
         if "thin_routing_view" in when and not self._thin(index, rule):
             return False

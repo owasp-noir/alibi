@@ -539,3 +539,34 @@ def test_an_alternative_ruleset_can_be_named_by_path_string(tmp_path):
     alternative.write_text("rules: []\n", encoding="utf-8")
 
     assert RuleSet.load(str(alternative)).rules == []
+
+
+def test_a_ruleset_mistake_is_reported_before_any_scan(tmp_path):
+    """A typo in `--rules` used to be a traceback -- after the scan, for a
+    condition only the first matching finding reached."""
+    from alibi.rules import RulesError
+
+    with pytest.raises(RulesError, match="cannot read"):
+        RuleSet.load(str(tmp_path / "missing.yml"))
+
+    typo = tmp_path / "typo.yml"
+    typo.write_text("adjustments:\n  - id: x\n    when: {tagg: pii}\n    shift: 1\n")
+    with pytest.raises(RulesError, match="unknown condition tagg"):
+        RuleSet.load(str(typo))
+
+    off_ladder = tmp_path / "ladder.yml"
+    off_ladder.write_text("severities: [low, high]\n"
+                          "rules:\n  - {id: X, severity: medium}\n")
+    with pytest.raises(RulesError, match="not on the ladder"):
+        RuleSet.load(str(off_ladder))
+
+
+def test_fail_on_a_severity_the_ruleset_does_not_have_is_refused(tmp_path, capsys):
+    from alibi.cli import EXIT_ERROR, main
+
+    ladder = tmp_path / "rules.yml"
+    ladder.write_text("severities: [low, high]\nrules: []\n")
+
+    assert main(["scan", str(tmp_path), "--rules", str(ladder),
+                 "--fail-on", "critical"]) == EXIT_ERROR
+    assert "not a severity in this ruleset" in capsys.readouterr().err

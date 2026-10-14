@@ -146,9 +146,10 @@ class Source:
 
     path: str
     name: str = ""
-    # The path the user actually named. A file source is staged into a
+    # Where the user's files actually live. A file source is staged into a
     # temporary directory before noir sees it, and `path` becomes that
-    # directory -- but a report has to speak in terms of what was asked for.
+    # directory -- but a report has to speak in terms of what was asked for,
+    # so for a file this is the directory it sits in.
     root: str = ""
 
     def __post_init__(self) -> None:
@@ -280,15 +281,17 @@ def scannable(source: Source):
             os.link(path, staged)
         except OSError:
             shutil.copy2(path, staged)
-        yield Source(path=staging, name=source.name, root=source.root)
+        yield Source(path=staging, name=source.name, root=str(path.parent))
 
 
 def find_noir(explicit: str | None = None) -> str:
     """Locate the noir binary, preferring an explicit path."""
     if explicit:
-        if Path(explicit).is_file():
-            return explicit
-        raise NoirNotFound(f"no noir binary at {explicit}")
+        if not Path(explicit).is_file():
+            raise NoirNotFound(f"no noir binary at {explicit}")
+        if not os.access(explicit, os.X_OK):
+            raise NoirNotFound(f"{explicit} is not executable")
+        return explicit
     found = shutil.which("noir")
     if not found:
         raise NoirNotFound(
@@ -364,6 +367,8 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
         )
     except subprocess.TimeoutExpired as exc:
         raise NoirFailed(f"noir timed out after {timeout}s on {source.path}") from exc
+    except OSError as exc:
+        raise NoirFailed(f"could not run {noir_bin}: {exc.strerror or exc}") from exc
 
     if proc.returncode != 0 and not proc.stdout.strip():
         detail = (proc.stderr or "").strip().splitlines()
@@ -379,7 +384,7 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
         ) from exc
 
     return ScanResult(
-        endpoints=[_convert(item, source.name, source.root)
+        endpoints=[_convert(item, source)
                    for item in document.get("endpoints", [])],
         errors=[
             ScanError(
@@ -459,21 +464,46 @@ def scan_views(source: Source, noir_bin: str, techs_by_view: dict[str, list[str]
     return ScanResult(endpoints=endpoints, errors=list(dict.fromkeys(errors)))
 
 
-def _convert(item: dict, source_name: str, source_root: str = "") -> RawEndpoint:
+def _convert(item: dict, source: Source) -> RawEndpoint:
     details = item.get("details") or {}
     return RawEndpoint(
         url=item.get("url", ""),
         method=item.get("method", ""),
         technology=details.get("technology", ""),
-        source=source_name,
+        source=source.name,
         tags=tuple(_tag_names(item.get("tags") or [])),
         params=tuple(item.get("params") or []),
-        code_paths=tuple(details.get("code_paths") or []),
+        code_paths=tuple(_unstage(cp, source)
+                         for cp in details.get("code_paths") or []),
         internal=bool(item.get("internal", False)),
         protocol=item.get("protocol", "http"),
-        source_root=source_root,
+        source_root=source.root,
         raw=item,
     )
+
+
+def _unstage(code_path: dict, source: Source) -> dict:
+    """Point a code path at the file the user named, not its staged copy.
+
+    Noir reports where it read a file, and for a file source that is the
+    temporary directory `scannable` deleted the moment the scan finished.
+    Every finding on `prod.har` or `openapi.yaml` passed by name was
+    reported at `/var/folders/.../alibi-x1y2/prod.har` -- in the terminal,
+    and as the SARIF location code scanning tries to open.
+    """
+    if source.path == source.root or not code_path.get("path"):
+        return code_path
+    path = Path(str(code_path["path"]))
+    staging = Path(source.path)
+    # Noir may report the staging directory with its symlinks resolved --
+    # macOS keeps temporary files under /var, a link to /private/var.
+    for base in (staging, staging.resolve()):
+        try:
+            rest = path.relative_to(base)
+        except ValueError:
+            continue
+        return dict(code_path, path=str(Path(source.root) / rest))
+    return code_path
 
 
 def _tag_names(tags: list) -> list[str]:
@@ -491,10 +521,15 @@ def _tag_names(tags: list) -> list[str]:
 
 def list_techs(noir_bin: str, timeout: int = 60) -> dict:
     """Read noir's own technology catalog -- the authority for view drift."""
-    proc = subprocess.run(
-        [noir_bin, "list", "techs", "-f", "json"],
-        capture_output=True, text=True, timeout=timeout, check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [noir_bin, "list", "techs", "-f", "json"],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise NoirFailed(f"`noir list techs` timed out after {timeout}s") from exc
+    except OSError as exc:
+        raise NoirFailed(f"could not run {noir_bin}: {exc.strerror or exc}") from exc
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as exc:

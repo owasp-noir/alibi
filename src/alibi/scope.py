@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from .index import Index
 
@@ -171,8 +172,9 @@ def from_tests(findings: list, index=None) -> TestHint | None:
     for finding in findings:
         matched = False
         for code_path in finding.entry.code_paths():
-            path = code_path.get("path") or ""
-            for match in _TEST_SEGMENT.finditer(path.replace("\\", "/")):
+            path = _inside_root(code_path.get("path") or "",
+                                code_path.get("source_root") or "")
+            for match in _TEST_SEGMENT.finditer(path):
                 seen.add(match.group(2).lower())
                 matched = True
         if matched:
@@ -202,10 +204,29 @@ def _load_bearing(index) -> set[str]:
             if observation.view == "code":
                 continue
             for code_path in observation.raw.code_paths:
-                path = (code_path.get("path") or "").replace("\\", "/")
+                path = _inside_root(code_path.get("path") or "",
+                                    observation.raw.source_root)
                 for match in _TEST_SEGMENT.finditer(path):
                     names.add(match.group(2).lower())
     return names
+
+
+def _inside_root(path: str, root: str) -> str:
+    """The part of a code path that belongs to the project being scanned.
+
+    Noir echoes back the base path it was given, so a checkout that happens
+    to live under `~/work/tests/` had every one of its files read as test
+    code, and the hint advised `--exclude-path '**/tests/**'` -- which
+    excludes the whole scan. Only directories inside the source say
+    anything about what the project ships.
+    """
+    path = path.replace("\\", "/")
+    if root:
+        try:
+            return PurePosixPath(path).relative_to(root.replace("\\", "/")).as_posix()
+        except ValueError:
+            pass
+    return path
 
 
 def applies(pattern: str, path: str) -> bool:
