@@ -103,8 +103,10 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                         # reach one, so skipped rules leave this true. A file
                         # noir could not read is different: the scan did not
                         # see everything it was pointed at, and a consumer that
-                        # treats the result as complete is being misled.
-                        "executionSuccessful": not errors,
+                        # treats the result as complete is being misled. A
+                        # symlink or an image it declined on purpose cost the
+                        # scan nothing, and is no reason to fail a CI gate.
+                        "executionSuccessful": not _degraded(errors),
                         "toolExecutionNotifications": [
                             _notification(item) for item in skipped
                         ] + [_error_notification(item) for item in errors],
@@ -129,7 +131,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                     "corroborated": index.corroborated,
                     "nearMisses": index.near_miss_count,
                     "suppressed": len(suppressed),
-                    "degraded": bool(errors),
+                    "degraded": _degraded(errors),
                 },
             }
         ],
@@ -158,10 +160,15 @@ def _uri_bases(findings: list[Finding]) -> dict:
     return {"originalUriBaseIds": {SRCROOT: {"uri": root.as_uri() + "/"}}}
 
 
+def _degraded(errors) -> bool:
+    """Did noir lose anything that could have held endpoints? See ScanError."""
+    return any(error.consequential for error in errors)
+
+
 def _error_notification(error) -> dict:
     """Something noir could not read, as a tool notification."""
     return {
-        "level": "warning",
+        "level": "warning" if error.consequential else "note",
         "message": {"text": f"noir could not read everything: {error.message}"},
         "properties": {"tech": error.tech, "source": error.source},
     }

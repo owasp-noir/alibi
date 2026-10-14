@@ -371,9 +371,14 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
         raise NoirFailed(f"could not run {noir_bin}: {exc.strerror or exc}") from exc
 
     if proc.returncode != 0 and not proc.stdout.strip():
+        # The status always, because noir's last stderr line is often a
+        # progress log rather than a reason: a noir killed mid-scan was
+        # reported as failing with "Code Analyzer: 1 in use".
+        status = (f"killed by signal {-proc.returncode}" if proc.returncode < 0
+                  else f"exit status {proc.returncode}")
         detail = (proc.stderr or "").strip().splitlines()
-        tail = detail[-1] if detail else f"exit status {proc.returncode}"
-        raise NoirFailed(f"noir failed on {source.path}: {tail}")
+        tail = f": {detail[-1].strip()}" if detail else ""
+        raise NoirFailed(f"noir failed on {source.path} ({status}){tail}")
 
     try:
         document = json.loads(proc.stdout)

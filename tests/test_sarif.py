@@ -340,6 +340,13 @@ def test_a_scan_that_could_not_read_everything_is_not_a_successful_run(
     clean = sarif.build(index, findings, skipped, ["t"], rules)
     assert clean["runs"][0]["invocations"][0]["executionSuccessful"] is True
 
+    # A symlink noir declined on purpose cost the scan nothing.
+    declined = [ScanError(tech="detect", message="skipped 1 entry: CLAUDE.md; "
+                                                 "first error: symbolic link")]
+    benign = sarif.build(index, findings, skipped, ["t"], rules, declined)
+    assert benign["runs"][0]["invocations"][0]["executionSuccessful"] is True
+    assert benign["runs"][0]["properties"]["degraded"] is False
+
 
 def test_a_suppressed_finding_is_reported_as_suppressed_not_dropped(
     endpoint, view_map

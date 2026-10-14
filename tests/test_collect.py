@@ -292,3 +292,13 @@ def test_a_noir_bin_that_cannot_be_run_is_named_not_raised(tmp_path):
 
     with pytest.raises(collect.NoirNotFound, match="not executable"):
         collect.find_noir(str(script))
+
+
+def test_a_noir_that_died_says_how(tmp_path):
+    """The last stderr line is often a progress log, not a reason."""
+    script = tmp_path / "noir"
+    script.write_text("#!/bin/sh\necho '  ➔ Code Analyzer: 1 in use' >&2\nkill -9 $$\n")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    with pytest.raises(collect.NoirFailed, match="killed by signal 9"):
+        collect.scan(collect.Source(str(tmp_path)), str(script))
