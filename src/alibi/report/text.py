@@ -302,7 +302,7 @@ def _render_finding(finding: Finding, paint: Painter, out) -> None:
 
 
 def _first_location(finding: Finding) -> str:
-    for path_info in finding.entry.code_paths():
+    for path_info in finding.code_paths():
         path = path_info.get("path")
         if not path:
             continue

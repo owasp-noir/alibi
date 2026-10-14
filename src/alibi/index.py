@@ -83,16 +83,23 @@ class Entry:
         originals = {o.normalized.original_path for o in self.observations}
         return GRADE_EXACT if len(originals) == 1 else GRADE_TEMPLATE
 
-    def code_paths(self) -> list[dict]:
+    def code_paths(self, first: tuple[str, ...] = ()) -> list[dict]:
         """Every file behind this endpoint, each carrying the root it came from.
 
         The root travels with the path because a report has to be able to say
         `routers/router.go` rather than the absolute path noir echoed back --
         GitHub code scanning matches alerts to source by repository-relative
         path, and an absolute `file://` URI matches nothing.
+
+        Files from the views in `first` lead, in their own order. A finding
+        is reported at its first file, and observations arrive in the order
+        the sources were scanned -- so a shadow API whose route was also in
+        a Bruno collection was reported at the `.bru` file, and in SARIF that
+        was the location code scanning opened.
         """
+        ordered = sorted(self.observations, key=lambda obs: obs.view not in first)
         return [dict(cp, source_root=obs.raw.source_root)
-                for obs in self.observations for cp in obs.raw.code_paths]
+                for obs in ordered for cp in obs.raw.code_paths]
 
 
 @dataclass
@@ -366,6 +373,14 @@ def _find_near_misses(index: Index) -> None:
     _find_siblings(index, by_path)
     tree = _PathTree(index)
 
+    # A routing rule is never the other half of a near miss. It is
+    # *supposed* to differ from what it reaches -- `location /api/` against
+    # a captured `POST /api/cart` is coverage working, and coverage already
+    # answers it -- so read as a near miss it demoted the ORPHAN on that
+    # request for a matching failure that did not exist. A lone rule can
+    # still be labelled a mount over the endpoints beneath it.
+    routing = set(index.coverages)
+
     for entry in index.entries.values():
         if len(entry.views) != 1:
             continue
@@ -381,7 +396,7 @@ def _find_near_misses(index: Index) -> None:
             slot = (entry.key.method, i, tuple(pieces[:i] + pieces[i + 1:]))
             pool = by_slot if piece in _PLACEHOLDERS else by_slot_param
             for other in pool[slot]:
-                if other is entry or other.views <= mine:
+                if other is entry or other.views - routing <= mine:
                     continue
                 candidates[id(other)] = other
         for other in sorted(candidates.values(), key=lambda e: position[id(e)]):
@@ -389,7 +404,7 @@ def _find_near_misses(index: Index) -> None:
             if reason:
                 entry.near_misses.append(NearMiss(other.key, other.views, reason))
 
-        mount = _looks_like_a_mount(entry, tree)
+        mount = _looks_like_a_mount(entry, tree, routing)
         if mount:
             entry.near_misses.append(mount)
 
@@ -421,7 +436,8 @@ class _PathTree:
         return found
 
 
-def _looks_like_a_mount(entry: Entry, tree: _PathTree) -> NearMiss | None:
+def _looks_like_a_mount(entry: Entry, tree: _PathTree,
+                        routing: set[str]) -> NearMiss | None:
     """Detect a registration that stands in for everything beneath it.
 
     Frameworks that hand a whole subtree to another router -- a gRPC gateway,
@@ -445,7 +461,7 @@ def _looks_like_a_mount(entry: Entry, tree: _PathTree) -> NearMiss | None:
     # Nothing at the prefix itself is beneath it: the entry's own path, and
     # any other verb on it, fall outside the slice by construction.
     for other in tree.beneath(prefix + "/"):
-        if other.views <= entry.views:
+        if other.views - routing <= entry.views:
             continue
         beneath |= other.views
         paths.add(other.key.path)

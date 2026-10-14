@@ -570,3 +570,24 @@ def test_fail_on_a_severity_the_ruleset_does_not_have_is_refused(tmp_path, capsy
     assert main(["scan", str(tmp_path), "--rules", str(ladder),
                  "--fail-on", "critical"]) == EXIT_ERROR
     assert "not a severity in this ruleset" in capsys.readouterr().err
+
+
+def test_a_finding_is_reported_at_a_file_from_the_view_it_is_about(endpoint, view_map):
+    """A shadow API is a fact about the code, so it is located in the code.
+
+    Observations arrive in the order sources were scanned, and the first file
+    was the one reported -- a SHADOW whose route was also in a Bruno
+    collection pointed at the `.bru`, in SARIF as well as the terminal.
+    """
+    endpoints = [
+        endpoint("/upload", "POST", "bruno",
+                 code_paths=({"path": "collections/upload.bru"},)),
+        endpoint("/upload", "POST", "python_flask",
+                 code_paths=({"path": "app/views.py", "line": 12},)),
+        endpoint("/anchor", "GET", "oas3"),
+        endpoint("/anchor", "GET", "python_flask"),
+    ]
+    findings, _ = evaluate(endpoints, view_map)
+
+    shadow = next(f for f in findings if f.rule_id == "SHADOW" and f.key.path == "/upload")
+    assert shadow.code_paths()[0]["path"] == "app/views.py"

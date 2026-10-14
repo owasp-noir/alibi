@@ -427,6 +427,7 @@ def _near_misses_the_slow_way(index):
     for entry in index.entries.values():
         by_shape[(entry.key.method, entry.key.path.count("/"))].append(entry)
 
+    routing = set(index.coverages)
     found = {}
     for entry in index.entries.values():
         if len(entry.views) != 1:
@@ -434,7 +435,7 @@ def _near_misses_the_slow_way(index):
         mine = entry.views
         misses = []
         for other in by_shape[(entry.key.method, entry.key.path.count("/"))]:
-            if other is entry or other.views <= mine:
+            if other is entry or other.views - routing <= mine:
                 continue
             reason = _one_segment_apart(entry.key.path, other.key.path)
             if reason:
@@ -448,7 +449,7 @@ def _near_misses_the_slow_way(index):
                     continue
                 if not other.key.path.startswith(prefix + "/"):
                     continue
-                if other.views <= entry.views:
+                if other.views - routing <= entry.views:
                     continue
                 beneath |= other.views
                 paths.add(other.key.path)
@@ -494,3 +495,25 @@ def test_the_indexed_near_miss_search_finds_what_the_scan_found():
             for key, entry in index.entries.items() if entry.near_misses
         }
         assert actual == expected
+
+
+def test_a_routing_rule_is_not_a_near_miss_for_what_it_reaches(endpoint, view_map):
+    """`location /api/` and a captured `POST /api/cart` are coverage working.
+
+    Read as a near miss, the gateway rule demoted the ORPHAN on that request
+    for a matching failure between traffic and code that did not exist.
+    """
+    index = build([
+        endpoint("/api/*", "POST", "nginx"),
+        endpoint("/api/cart", "POST", "har"),
+        endpoint("/api", "GET", "python_flask"),
+        endpoint("/api/a", "ANY", "nginx"),
+        endpoint("/api/b", "ANY", "nginx"),
+        endpoint("/api/c", "ANY", "nginx"),
+    ], view_map)
+
+    cart = index.entries[next(k for k in index.entries if k.path == "/api/cart")]
+    api = index.entries[next(k for k in index.entries if k.path == "/api")]
+    assert cart.near_misses == []
+    # Three gateway rules beneath a code route do not make it a mount.
+    assert api.near_misses == []

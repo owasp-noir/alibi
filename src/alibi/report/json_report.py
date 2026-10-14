@@ -159,7 +159,7 @@ def _finding(finding: Finding) -> dict:
         "technologies": sorted(entry.techs),
         "tags": sorted(entry.tags),
         "originals": sorted({o.normalized.original_url for o in entry.observations}),
-        "code_paths": entry.code_paths(),
+        "code_paths": finding.code_paths(),
         "adjustments": [
             {"shift": a.shift, "why": a.why} for a in finding.adjustments
         ],

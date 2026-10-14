@@ -276,7 +276,7 @@ def _locations(finding: Finding) -> list[dict]:
     physical: list[dict] = []
     seen: set[tuple[str, int | None]] = set()
 
-    for code_path in finding.entry.code_paths():
+    for code_path in finding.code_paths():
         path = code_path.get("path")
         if not path:
             continue

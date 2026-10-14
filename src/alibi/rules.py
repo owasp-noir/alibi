@@ -34,10 +34,16 @@ class Finding:
     base_severity: str
     entry: Entry
     adjustments: list[Adjustment] = field(default_factory=list)
+    # The views the rule found this endpoint present in, whose files are
+    # the ones the finding is about.
+    about: tuple[str, ...] = ()
 
     @property
     def key(self):
         return self.entry.key
+
+    def code_paths(self) -> list[dict]:
+        return self.entry.code_paths(self.about)
 
     @property
     def grade(self) -> str:
@@ -390,6 +396,7 @@ class RuleSet:
             base_severity=base,
             entry=entry,
             adjustments=applied,
+            about=tuple(rule.get("present", [])),
         )
 
     # Every key a condition may use. An unrecognised one is a mistake, and it
