@@ -451,7 +451,7 @@ def _near_misses_the_slow_way(index):
                     continue
                 if other.views - routing <= entry.views:
                     continue
-                beneath |= other.views
+                beneath |= other.views - routing
                 paths.add(other.key.path)
                 segs.add(other.key.path[len(prefix) + 1:].split("/")[0])
             if len(paths) >= MOUNT_THRESHOLD and not (

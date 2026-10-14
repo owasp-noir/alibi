@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from ..collect import degraded
 from ..index import Index
 from ..rules import MAX_UNCORROBORATED_FINDINGS, Finding, Skipped
 from ..scope import from_tests, missing_subtree, suggest
@@ -75,7 +76,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             "near_misses": index.near_miss_count,
             # Only a loss that could have cost endpoints -- the text report's
             # distinction, so the two formats agree on whether a scan is whole.
-            "degraded": any(e.consequential for e in errors),
+            "degraded": degraded(errors),
             "suppressed": len(suppressed),
             "views": view_counts,
             "coverage": {

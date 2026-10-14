@@ -90,8 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--noir-bin", help="path to the noir binary (default: found on PATH)")
     scan.add_argument("--views", help="alternative views.yml")
     scan.add_argument("--rules", help="alternative rules.yml")
-    scan.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"],
-                      help="exit non-zero when a finding reaches this severity")
+    # No `choices`: the ladder is the ruleset's, and a custom one names its
+    # own rungs. Checked against it in `_scan`, before noir runs.
+    scan.add_argument("--fail-on", metavar="SEVERITY",
+                      help="exit non-zero when a finding reaches this severity "
+                           "(info, low, medium, high, critical)")
     scan.add_argument("--noir-arg", action="append", default=[], metavar="ARG",
                       help="one argument passed through to noir; repeatable. "
                            "A value starting with a dash needs the joined form, "

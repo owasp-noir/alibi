@@ -42,6 +42,7 @@ from importlib.metadata import version as _installed_version
 from pathlib import Path
 from urllib.parse import quote
 
+from ..collect import degraded
 from ..index import Index
 from ..rules import Finding, RuleSet, Skipped
 
@@ -106,7 +107,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                         # treats the result as complete is being misled. A
                         # symlink or an image it declined on purpose cost the
                         # scan nothing, and is no reason to fail a CI gate.
-                        "executionSuccessful": not _degraded(errors),
+                        "executionSuccessful": not degraded(errors),
                         "toolExecutionNotifications": [
                             _notification(item) for item in skipped
                         ] + [_error_notification(item) for item in errors],
@@ -131,7 +132,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                     "corroborated": index.corroborated,
                     "nearMisses": index.near_miss_count,
                     "suppressed": len(suppressed),
-                    "degraded": _degraded(errors),
+                    "degraded": degraded(errors),
                 },
             }
         ],
@@ -158,11 +159,6 @@ def _uri_bases(findings: list[Finding]) -> dict:
     if not root.is_absolute():
         return {}
     return {"originalUriBaseIds": {SRCROOT: {"uri": root.as_uri() + "/"}}}
-
-
-def _degraded(errors) -> bool:
-    """Did noir lose anything that could have held endpoints? See ScanError."""
-    return any(error.consequential for error in errors)
 
 
 def _error_notification(error) -> dict:

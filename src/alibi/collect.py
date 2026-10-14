@@ -146,10 +146,9 @@ class Source:
 
     path: str
     name: str = ""
-    # Where the user's files actually live. A file source is staged into a
+    # The path the user actually named. A file source is staged into a
     # temporary directory before noir sees it, and `path` becomes that
-    # directory -- but a report has to speak in terms of what was asked for,
-    # so for a file this is the directory it sits in.
+    # directory -- but a report has to speak in terms of what was asked for.
     root: str = ""
 
     def __post_init__(self) -> None:
@@ -206,8 +205,16 @@ class ScanError:
         loss, which is a line of noise. The cost of the other direction is
         `0 endpoints` presented as a clean result.
         """
-        message = self.message.lower()
-        return not any(mark in message for mark in self.DECLINED_ON_PURPOSE)
+        # The reason only. The other half is a list of file names, and a
+        # file called `binary-content.json` says nothing about why it went.
+        head, _, reason = self.message.lower().partition("first error:")
+        reason = reason or head
+        return not any(mark in reason for mark in self.DECLINED_ON_PURPOSE)
+
+
+def degraded(errors: list[ScanError]) -> bool:
+    """Did noir lose anything that could have held endpoints?"""
+    return any(error.consequential for error in errors)
 
 
 @dataclass
@@ -281,7 +288,7 @@ def scannable(source: Source):
             os.link(path, staged)
         except OSError:
             shutil.copy2(path, staged)
-        yield Source(path=staging, name=source.name, root=str(path.parent))
+        yield Source(path=staging, name=source.name, root=source.root)
 
 
 def find_noir(explicit: str | None = None) -> str:
@@ -482,7 +489,11 @@ def _convert(item: dict, source: Source) -> RawEndpoint:
                          for cp in details.get("code_paths") or []),
         internal=bool(item.get("internal", False)),
         protocol=item.get("protocol", "http"),
-        source_root=source.root,
+        # A file names no checkout, and its own directory is the wrong one:
+        # `api/openapi.yaml` scanned beside the repository root it lives in
+        # became `openapi.yaml` in SARIF, which code scanning cannot place.
+        # Left empty, reports fall back to the working directory.
+        source_root=source.root if source.path == source.root else "",
         raw=item,
     )
 
@@ -498,6 +509,7 @@ def _unstage(code_path: dict, source: Source) -> dict:
     """
     if source.path == source.root or not code_path.get("path"):
         return code_path
+    original = Path(source.root)
     path = Path(str(code_path["path"]))
     staging = Path(source.path)
     # Noir may report the staging directory with its symlinks resolved --
@@ -507,7 +519,7 @@ def _unstage(code_path: dict, source: Source) -> dict:
             rest = path.relative_to(base)
         except ValueError:
             continue
-        return dict(code_path, path=str(Path(source.root) / rest))
+        return dict(code_path, path=str(original.parent / rest))
     return code_path
 
 

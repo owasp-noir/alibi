@@ -207,9 +207,11 @@ def _load_bearing(index) -> set[str]:
         for observation in entry.observations:
             if observation.view == "code":
                 continue
+            # The whole path, not the part inside the root: noir matches an
+            # exclude glob against the whole path, so a contract under
+            # `spec/openapi/` is deleted by `**/spec/**` wherever its root is.
             for code_path in observation.raw.code_paths:
-                path = _inside_root(code_path.get("path") or "",
-                                    observation.raw.source_root)
+                path = (code_path.get("path") or "").replace("\\", "/")
                 for match in _TEST_SEGMENT.finditer(path):
                     names.add(match.group(2))
     return names

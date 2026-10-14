@@ -343,3 +343,23 @@ def test_hint_commands_name_what_they_measured(endpoint, view_map):
     index, findings, _ = scan(endpoints, view_map)
 
     assert from_tests(findings, index).exclude_globs == ["**/Tests/**"]
+
+
+def test_a_contract_under_a_test_named_root_is_still_protected(endpoint, view_map):
+    """`alibi scan backend spec/openapi`: the glob `**/spec/**` is matched
+    against the whole path, so it would delete the contract."""
+    from alibi.scope import from_tests
+
+    endpoints = [
+        endpoint(f"/fixture{i}", "GET", "python_flask", source_root="backend",
+                 code_paths=({"path": f"backend/spec/requests/r{i}.py"},))
+        for i in range(15)
+    ]
+    endpoints += [
+        endpoint("/anchor", "GET", "oas3", source_root="spec/openapi",
+                 code_paths=({"path": "spec/openapi/openapi.yaml"},)),
+        endpoint("/anchor", "GET", "python_flask"),
+    ]
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index) is None

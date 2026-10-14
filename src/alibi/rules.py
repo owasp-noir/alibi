@@ -104,9 +104,9 @@ class RuleSet:
         self.severities: list[str] = data.get(
             "severities", ["info", "low", "medium", "high", "critical"]
         )
-        self.rules: list[dict] = data.get("rules", [])
-        self.adjustments: list[dict] = data.get("adjustments", [])
-        self.suppressions: list[dict] = data.get("suppress", [])
+        self.rules: list[dict] = data.get("rules") or []
+        self.adjustments: list[dict] = data.get("adjustments") or []
+        self.suppressions: list[dict] = data.get("suppress") or []
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> RuleSet:
@@ -127,16 +127,49 @@ class RuleSet:
 
     def check(self) -> None:
         """Everything `evaluate` would trip over, asked before there is a scan."""
-        whens = [rule["when"] for rule in self.rules if rule.get("when")]
-        whens += [item["when"] for item in self.adjustments + self.suppressions]
-        for when in whens:
-            self._known(when)
+        for name, section in (("rules", self.rules), ("adjustments", self.adjustments),
+                              ("suppress", self.suppressions)):
+            if not isinstance(section, list) or not all(
+                    isinstance(item, dict) for item in section):
+                raise RulesError(f"`{name}:` should be a list of mappings")
+        if not all("id" in item for item in self.rules + self.adjustments):
+            raise RulesError("every rule and adjustment needs an `id`")
+
         for rule in self.rules:
             severity = rule.get("severity", "medium")
             if severity not in self.severities:
                 raise RulesError(
                     f"rule {rule['id']} has severity {severity!r}, which is not "
                     f"on the ladder ({', '.join(self.severities)})")
+
+        # A rule's `when` is optional; an adjustment or suppression without
+        # one is skipped by nothing and read by `_build` and `_suppressed`.
+        whens = [rule.get("when") or {} for rule in self.rules]
+        for item in self.adjustments + self.suppressions:
+            if not isinstance(item.get("when"), dict):
+                raise RulesError(f"{item.get('id', 'a suppression')} needs a "
+                                 f"`when:` mapping")
+            whens.append(item["when"])
+        for item in self.adjustments:
+            try:
+                int(item.get("shift"))
+            except (TypeError, ValueError):
+                raise RulesError(f"adjustment {item.get('id')} needs an integer "
+                                 f"`shift`, not {item.get('shift')!r}") from None
+            signal = item.get("needs_signal") or {}
+            if signal.get("tag_matching"):
+                whens.append({"tag_matching": signal["tag_matching"]})
+
+        for when in whens:
+            if not isinstance(when, dict):
+                raise RulesError(f"`when:` should be a mapping, not {when!r}")
+            self._known(when)
+            if "tag_matching" in when:
+                try:
+                    re.compile(when["tag_matching"])
+                except (re.error, TypeError) as exc:
+                    raise RulesError(f"tag_matching {when['tag_matching']!r} is not "
+                                     f"a valid regular expression: {exc}") from exc
 
     def _shift(self, severity: str, steps: int) -> str:
         try:
@@ -148,6 +181,9 @@ class RuleSet:
 
     def evaluate(self, index: Index,
                  present_views: set[str]) -> tuple[list[Finding], list[Skipped]]:
+        # Once per scan, so a ruleset edited after `load` still fails before
+        # it produces anything rather than per condition, every time.
+        self.check()
         findings: list[Finding] = []
         skipped: list[Skipped] = []
         runnable = []
@@ -420,8 +456,6 @@ class RuleSet:
 
     def _condition(self, entry: Entry, when: dict, index: Index,
                    rule: dict | None = None) -> bool:
-        self._known(when)
-
         if "thin_routing_view" in when and not self._thin(index, rule):
             return False
 

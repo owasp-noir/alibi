@@ -124,7 +124,7 @@ def test_a_file_source_is_reported_where_it_lives_not_where_it_was_staged(tmp_pa
 
     [found] = result.endpoints
     assert found.code_paths[0]["path"] == str(target)
-    assert found.source_root == str(captures)
+    assert found.source_root == ""
 
 
 def test_a_directory_is_passed_through_untouched(tmp_path):
@@ -302,3 +302,12 @@ def test_a_noir_that_died_says_how(tmp_path):
 
     with pytest.raises(collect.NoirFailed, match="killed by signal 9"):
         collect.scan(collect.Source(str(tmp_path)), str(script))
+
+
+def test_a_file_name_is_not_a_reason_to_call_a_loss_benign():
+    """Only the reason half decides; the other half is a list of names."""
+    named = collect.ScanError(tech="detect",
+                              message="skipped 1 file: binary-content.json; "
+                                      "first error: file too large")
+    assert named.consequential is True
+    assert collect.degraded([named]) is True

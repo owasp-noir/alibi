@@ -120,6 +120,11 @@ class Rule:
     prefix: bool
 
     def reaches(self, target: Key) -> bool:
+        if target.catch_all:
+            # The mirror case: a code fallback at `/*` matches every rule
+            # once a spanning segment can absorb a rule's literals, and a
+            # gateway for another service would then "reach" the code.
+            return False
         if self.key.catch_all:
             # `location /` reaches everything. True, and no use as evidence of
             # anything, so it is not treated as coverage -- of anything, the

@@ -463,7 +463,7 @@ def _looks_like_a_mount(entry: Entry, tree: _PathTree,
     for other in tree.beneath(prefix + "/"):
         if other.views - routing <= entry.views:
             continue
-        beneath |= other.views
+        beneath |= other.views - routing
         paths.add(other.key.path)
         segments.add(other.key.path[len(prefix) + 1:].split("/")[0])
 

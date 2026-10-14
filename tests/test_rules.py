@@ -591,3 +591,36 @@ def test_a_finding_is_reported_at_a_file_from_the_view_it_is_about(endpoint, vie
 
     shadow = next(f for f in findings if f.rule_id == "SHADOW" and f.key.path == "/upload")
     assert shadow.code_paths()[0]["path"] == "app/views.py"
+
+
+def test_a_ruleset_value_that_would_fail_mid_scan_fails_at_load(tmp_path):
+    """Checking condition names was not enough: a bad regex, a missing
+    `when` or a non-numeric shift still waited for the first finding."""
+    from alibi.rules import RulesError
+
+    cases = {
+        "adjustments:\n  - {id: a, when: {tag_matching: '('}, shift: 1}\n": "regular expression",
+        "adjustments:\n  - {id: a, rules: [X], shift: 1}\n": "needs a `when:`",
+        "adjustments:\n  - {id: a, when: {tag: pii}, shift: up}\n": "integer `shift`",
+        "adjustments:\n  - {id: a, when: {tag: pii}, shift: 1,"
+        " needs_signal: {tag_matching: '['}}\n": "regular expression",
+        "rules:\n  - {name: no id}\n": "needs an `id`",
+    }
+    for text, message in cases.items():
+        broken = tmp_path / "rules.yml"
+        broken.write_text(text)
+        with pytest.raises(RulesError, match=message):
+            RuleSet.load(str(broken))
+
+    empty = tmp_path / "empty.yml"
+    empty.write_text("adjustments:\n")
+    assert RuleSet.load(str(empty)).adjustments == []
+
+
+def test_fail_on_accepts_a_custom_ladders_own_rung(tmp_path):
+    from alibi.cli import EXIT_OK, main
+
+    ladder = tmp_path / "rules.yml"
+    ladder.write_text("severities: [minor, severe]\nrules: []\n")
+    assert main(["scan", str(tmp_path), "--rules", str(ladder),
+                 "--fail-on", "severe", "-f", "json"]) == EXIT_OK
