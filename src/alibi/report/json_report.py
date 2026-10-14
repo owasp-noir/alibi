@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from ..collect import degraded
 from ..index import Index
 from ..rules import MAX_UNCORROBORATED_FINDINGS, Finding, Skipped
 from ..scope import from_tests, missing_subtree, suggest
@@ -64,7 +65,8 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             for name, count, views in index.by_source(sources)
         ],
         "scan_errors": [
-            {"tech": e.tech, "message": e.message, "source": e.source}
+            {"tech": e.tech, "message": e.message, "source": e.source,
+             "consequential": e.consequential}
             for e in errors
         ],
         "summary": {
@@ -72,7 +74,9 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             "corroborated": index.corroborated,
             "findings": len(findings),
             "near_misses": index.near_miss_count,
-            "degraded": bool(errors),
+            # Only a loss that could have cost endpoints -- the text report's
+            # distinction, so the two formats agree on whether a scan is whole.
+            "degraded": degraded(errors),
             "suppressed": len(suppressed),
             "views": view_counts,
             "coverage": {
@@ -156,7 +160,7 @@ def _finding(finding: Finding) -> dict:
         "technologies": sorted(entry.techs),
         "tags": sorted(entry.tags),
         "originals": sorted({o.normalized.original_url for o in entry.observations}),
-        "code_paths": entry.code_paths(),
+        "code_paths": finding.code_paths(),
         "adjustments": [
             {"shift": a.shift, "why": a.why} for a in finding.adjustments
         ],

@@ -55,6 +55,15 @@ def matches(pattern: str, path: str) -> bool:
 
 
 def _match(pattern: list[str], path: list[str]) -> bool:
+    if path and path[0] == _MANY:
+        # The same reading from the other side, as `{}` gets below: an
+        # endpoint registered as `/files/<path:p>` serves `/files/download`.
+        # Without it, `location /files/download/` in front of that Flask
+        # route was a dangling rule *and* the route was unexposed -- two
+        # findings for one rule that reaches exactly the code it should.
+        return any(_match(pattern[take:], path[1:])
+                   for take in range(len(pattern) + 1))
+
     if not pattern:
         return not path
 
@@ -111,6 +120,11 @@ class Rule:
     prefix: bool
 
     def reaches(self, target: Key) -> bool:
+        if target.catch_all:
+            # The mirror case: a code fallback at `/*` matches every rule
+            # once a spanning segment can absorb a rule's literals, and a
+            # gateway for another service would then "reach" the code.
+            return False
         if self.key.catch_all:
             # `location /` reaches everything. True, and no use as evidence of
             # anything, so it is not treated as coverage -- of anything, the
@@ -230,6 +244,11 @@ class Coverage:
         return answer
 
     def _covers(self, target: Key) -> bool:
+        if _MANY in segments(target.path):
+            # A spanning segment matches whole runs of rule segments, which
+            # the trie walk cannot follow. Targets like this are a handful.
+            return any(rule.reaches(target) for rule in self._rules)
+
         wanted = {WILDCARD_METHOD, target.method}
         # Every rule path the target's segments could be spelling. One node
         # until a `{}` in the target, which matches any rule segment and so
@@ -263,6 +282,9 @@ class KeySet:
 
     def __init__(self, keys: list[Key]) -> None:
         self._keys = keys
+        # Keys with a spanning segment, which reach rules the trie cannot
+        # see -- see `Coverage._covers`.
+        self._spanning = [key for key in keys if _MANY in segments(key.path)]
         self._root = _Node()
         for key in keys:
             node = self._root
@@ -280,6 +302,9 @@ class KeySet:
         parts = segments(rule.key.path)
         if not _plain_pattern(parts):
             return any(rule.reaches(key) for key in self._keys)
+
+        if any(rule.reaches(key) for key in self._spanning):
+            return True
 
         wanted = None if rule.key.method == WILDCARD_METHOD else {rule.key.method}
         nodes = [self._root]

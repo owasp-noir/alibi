@@ -185,25 +185,33 @@ def record(db_path: Path | str, index: Index, findings: list[Finding],
         )
         scan_id = int(cursor.lastrowid)
 
+        # Sets, because the history is keyed on method and path while the
+        # index is keyed on protocol too: an HTTP `GET /socket` and a
+        # WebSocket one are two entries and one row here, and the duplicate
+        # failed the primary key -- reported as an unreadable database, with
+        # the scan unrecorded.
         conn.executemany(
             "INSERT INTO sighting (scan_id, method, path, view) VALUES (?, ?, ?, ?)",
-            [
+            sorted({
                 (scan_id, entry.key.method, entry.key.path, view)
                 for entry in index.entries.values()
-                for view in sorted(entry.views)
-            ],
+                for view in entry.views
+            }),
         )
         conn.executemany(
             "INSERT INTO ran_rule (scan_id, rule_id) VALUES (?, ?)",
             [(scan_id, rule_id) for rule_id in sorted(set(ran or []))],
         )
+        # The same collapse for a rule a custom ruleset runs on more than
+        # one protocol. Findings arrive worst first, so the first is kept.
+        recorded: dict[tuple, str] = {}
+        for f in findings:
+            recorded.setdefault((scan_id, f.rule_id, f.key.method, f.key.path),
+                                f.severity)
         conn.executemany(
             "INSERT INTO finding (scan_id, rule_id, method, path, severity) "
             "VALUES (?, ?, ?, ?, ?)",
-            [
-                (scan_id, f.rule_id, f.key.method, f.key.path, f.severity)
-                for f in findings
-            ],
+            [(*identity, severity) for identity, severity in recorded.items()],
         )
 
     return scan_id

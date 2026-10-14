@@ -169,7 +169,7 @@ def render(
         out(f"{paint(rule_id, 'bold')}  {head.name} "
             + paint(f"-- {head.summary}", "dim"))
         out(paint(f"  {len(group)} finding{'s' if len(group) != 1 else ''}"
-                  f"{_breakdown(group, paint)}", "dim"))
+                  f"{_breakdown(group, rules.severities)}", "dim"))
         out()
 
         # A report nobody scrolls to the end of is a report nobody reads. The
@@ -246,15 +246,19 @@ def _render_sources(index: Index, sources: list[str], paint: Painter, out) -> No
                   f"the format there.", "dim"))
 
 
-def _breakdown(group: list[Finding], paint: Painter) -> str:
-    """The severity mix of a group, so a truncated list still says what it holds."""
+def _breakdown(group: list[Finding], severities: list[str]) -> str:
+    """The severity mix of a group, so a truncated list still says what it holds.
+
+    Worst first along the ruleset's own ladder: a fixed list of the default
+    five dropped every rung a custom ladder named, and the counts no longer
+    added up to the group.
+    """
     counts: dict[str, int] = {}
     for finding in group:
         counts[finding.severity] = counts.get(finding.severity, 0) + 1
     if len(counts) < 2:
         return ""
-    order = ["critical", "high", "medium", "low", "info"]
-    parts = [f"{counts[s]} {s}" for s in order if s in counts]
+    parts = [f"{counts[s]} {s}" for s in reversed(severities) if s in counts]
     return "  ·  " + ", ".join(parts)
 
 
@@ -298,7 +302,7 @@ def _render_finding(finding: Finding, paint: Painter, out) -> None:
 
 
 def _first_location(finding: Finding) -> str:
-    for path_info in finding.entry.code_paths():
+    for path_info in finding.code_paths():
         path = path_info.get("path")
         if not path:
             continue
@@ -541,7 +545,9 @@ def _wrap(text: str, width: int = 74, indent: str = "  ") -> str:
     lines: list[str] = []
     current = ""
     for word in words:
-        if len(current) + len(word) + 1 > width:
+        # A word longer than the line -- an absolute path, usually -- goes
+        # on a line of its own instead of leaving an empty one behind it.
+        if current and len(current) + len(word) + 1 > width:
             lines.append(current)
             current = word
         else:

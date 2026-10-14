@@ -8,8 +8,8 @@ import sys
 from . import collect, snapshot
 from .ignore import IgnoreError, IgnoreList
 from .index import build as build_index
-from .rules import RuleSet
-from .views import ViewMap
+from .rules import RulesError, RuleSet
+from .views import ViewMap, ViewsError
 
 # The report modules are imported where a format is chosen, not here. Only
 # one of the three ever runs, `sarif` pulls importlib.metadata behind it, and
@@ -90,8 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--noir-bin", help="path to the noir binary (default: found on PATH)")
     scan.add_argument("--views", help="alternative views.yml")
     scan.add_argument("--rules", help="alternative rules.yml")
-    scan.add_argument("--fail-on", choices=["info", "low", "medium", "high", "critical"],
-                      help="exit non-zero when a finding reaches this severity")
+    # No `choices`: the ladder is the ruleset's, and a custom one names its
+    # own rungs. Checked against it in `_scan`, before noir runs.
+    scan.add_argument("--fail-on", metavar="SEVERITY",
+                      help="exit non-zero when a finding reaches this severity "
+                           "(info, low, medium, high, critical)")
     scan.add_argument("--noir-arg", action="append", default=[], metavar="ARG",
                       help="one argument passed through to noir; repeatable. "
                            "A value starting with a dash needs the joined form, "
@@ -157,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "history":
             return _history(args)
     except (collect.NoirNotFound, collect.NoirFailed, collect.NoirTooOld,
-            collect.DangerousNoirArg, snapshot.SnapshotError, IgnoreError) as exc:
+            collect.DangerousNoirArg, snapshot.SnapshotError, IgnoreError,
+            RulesError, ViewsError) as exc:
         print(f"alibi: {exc}", file=sys.stderr)
         return EXIT_ERROR
     return EXIT_ERROR
@@ -173,6 +177,11 @@ def _scan(args) -> int:
 
     view_map = ViewMap.load(args.views)
     rules = RuleSet.load(args.rules)
+    # argparse offers the default ladder; a `--rules` file may name another,
+    # and finding that out after the report printed was a traceback.
+    if args.fail_on and args.fail_on not in rules.severities:
+        raise RulesError(f"--fail-on {args.fail_on} is not a severity in "
+                         f"this ruleset ({', '.join(rules.severities)})")
 
     # Before noir runs, not after. A mistyped `--ignore` pattern is an
     # ordinary thing to do, and finding out about it should not cost the scan

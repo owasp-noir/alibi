@@ -128,3 +128,34 @@ def test_indexed_coverage_agrees_with_the_matcher():
         keys = KeySet(targets)
         for rule in rules:
             assert keys.reached_by(rule) == any(rule.reaches(k) for k in targets), (rule, targets)
+
+
+def test_an_endpoint_that_spans_segments_is_reached_by_a_rule_beneath_it():
+    """`location /files/download/` in front of Flask's `/files/<path:p>`.
+
+    The rule reaches exactly the code that serves it, and was reported as a
+    dangling rule while the route was reported as unexposed -- `{}` in an
+    endpoint matched a rule's literal segment, and `*` did not.
+    """
+    from alibi.cover import Coverage, KeySet
+
+    rule = Rule(key=Key("ANY", "/files/download"), view="gateway", prefix=True)
+    route = Key("GET", "/files/*")
+
+    assert rule.reaches(route)
+    assert Coverage([rule]).covers(route)
+    assert KeySet([route]).reached_by(rule)
+    assert not KeySet([Key("GET", "/other/*")]).reached_by(rule)
+
+
+def test_a_code_fallback_is_reached_by_no_rule():
+    """Flask `/<path:p>` absorbs any rule once `*` spans, so every gateway --
+    one fronting another service included -- would have "reached" the code."""
+    from alibi.cover import Coverage, KeySet
+
+    rule = Rule(key=Key("ANY", "/legacy/v0"), view="gateway", prefix=True)
+    fallback = Key("GET", "/*")
+
+    assert not rule.reaches(fallback)
+    assert not Coverage([rule]).covers(fallback)
+    assert not KeySet([fallback]).reached_by(rule)

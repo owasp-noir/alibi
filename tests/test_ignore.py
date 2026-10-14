@@ -118,6 +118,22 @@ def test_a_suppression_that_cannot_be_read_is_reported_not_raised(tmp_path):
         IgnoreList.load(tmp_path / "absent.yml")
 
 
+def test_a_suppression_that_would_match_nothing_is_refused(tmp_path):
+    """`paths:` for `path:`, or an entry with only a reason, silenced nothing.
+
+    The project believed the finding was suppressed and it was not, with no
+    sign anywhere that the entry had been read and thrown away.
+    """
+    config = tmp_path / ".alibi.yml"
+    config.write_text('ignore:\n  - paths: "^/admin/"\n    why: internal\n')
+    with pytest.raises(IgnoreError, match="unknown key paths"):
+        IgnoreList.load(config)
+
+    config.write_text("ignore:\n  - why: internal\n")
+    with pytest.raises(IgnoreError, match="names no path, rule or view"):
+        IgnoreList.load(config)
+
+
 def test_a_bad_ignore_pattern_does_not_cost_the_scan(monkeypatch, capsys):
     """Noir is the only expensive part of a run, and it had already happened.
 

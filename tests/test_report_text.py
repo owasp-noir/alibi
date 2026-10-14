@@ -324,3 +324,18 @@ def test_a_scan_whose_only_rule_was_held_back_does_not_claim_agreement(
     assert "No disagreement" not in out
     assert "nothing was compared" in out
     assert "catch-all rule at /" in out
+
+
+def test_a_word_longer_than_the_line_leaves_no_empty_line_before_it():
+    long_path = "/home/runner/work/service/service/" + "x" * 60 + "/openapi.json"
+    assert text._wrap(long_path).splitlines() == [long_path]
+
+
+def test_the_severity_mix_follows_a_custom_ladder(endpoint, view_map):
+    """A fixed list of the default five dropped the rungs a ruleset added."""
+    class F:
+        def __init__(self, severity):
+            self.severity = severity
+
+    group = [F("severe"), F("severe"), F("minor")]
+    assert text._breakdown(group, ["minor", "severe"]) == "  ·  2 severe, 1 minor"

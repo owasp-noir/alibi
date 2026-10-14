@@ -137,6 +137,30 @@ def test_a_directory_another_view_needs_is_never_suggested(endpoint, view_map):
     assert from_tests(findings, index) is None
 
 
+def test_a_checkout_that_lives_under_a_tests_directory_is_not_test_code(
+        endpoint, view_map):
+    """Only directories inside the scanned source say what the project ships.
+
+    Noir echoes the base path back, so a repository cloned to
+    `/home/me/tests/shop` had every file read as test code -- and the hint
+    advised `--exclude-path '**/tests/**'`, which excludes the whole scan.
+    """
+    from alibi.scope import from_tests
+
+    root = "/home/me/tests/shop"
+    endpoints = [
+        endpoint(f"/route{i}", "GET", "python_flask", source_root=root,
+                 code_paths=({"path": f"{root}/app.py", "line": i},))
+        for i in range(15)
+    ]
+    endpoints += [endpoint("/anchor", "GET", "oas3"),
+                  endpoint("/anchor", "GET", "python_flask")]
+
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index) is None
+
+
 def test_a_handful_of_test_findings_is_not_worth_a_paragraph(endpoint, view_map):
     from alibi.scope import from_tests
 
@@ -299,3 +323,43 @@ def test_a_subtree_the_other_view_does_hold_is_not_missing(endpoint, view_map):
 
     index, findings, ruleset = scan(endpoints, view_map)
     assert missing_subtree(findings, index, ruleset, floor=10) is None
+
+
+def test_hint_commands_name_what_they_measured(endpoint, view_map):
+    """A prefix is a path, not a pattern, and a directory keeps its case."""
+    from alibi.scope import Hint, applies, from_tests
+
+    hint = Hint(view="doc", prefix="/v1.0", concentration=1.0, inside=0, outside=10)
+    assert applies(hint.ignore_pattern, "/v1x0/users")
+    assert not applies(hint.ignore_pattern, "/v1.0/users")
+
+    endpoints = [
+        endpoint(f"/fixture{i}", "GET", "swift_vapor",
+                 code_paths=({"path": f"Tests/AppTests/case{i}.swift"},))
+        for i in range(15)
+    ]
+    endpoints += [endpoint("/anchor", "GET", "oas3"),
+                  endpoint("/anchor", "GET", "swift_vapor")]
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index).exclude_globs == ["**/Tests/**"]
+
+
+def test_a_contract_under_a_test_named_root_is_still_protected(endpoint, view_map):
+    """`alibi scan backend spec/openapi`: the glob `**/spec/**` is matched
+    against the whole path, so it would delete the contract."""
+    from alibi.scope import from_tests
+
+    endpoints = [
+        endpoint(f"/fixture{i}", "GET", "python_flask", source_root="backend",
+                 code_paths=({"path": f"backend/spec/requests/r{i}.py"},))
+        for i in range(15)
+    ]
+    endpoints += [
+        endpoint("/anchor", "GET", "oas3", source_root="spec/openapi",
+                 code_paths=({"path": "spec/openapi/openapi.yaml"},)),
+        endpoint("/anchor", "GET", "python_flask"),
+    ]
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index) is None

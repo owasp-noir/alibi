@@ -42,6 +42,7 @@ from importlib.metadata import version as _installed_version
 from pathlib import Path
 from urllib.parse import quote
 
+from ..collect import degraded
 from ..index import Index
 from ..rules import Finding, RuleSet, Skipped
 
@@ -103,8 +104,10 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                         # reach one, so skipped rules leave this true. A file
                         # noir could not read is different: the scan did not
                         # see everything it was pointed at, and a consumer that
-                        # treats the result as complete is being misled.
-                        "executionSuccessful": not errors,
+                        # treats the result as complete is being misled. A
+                        # symlink or an image it declined on purpose cost the
+                        # scan nothing, and is no reason to fail a CI gate.
+                        "executionSuccessful": not degraded(errors),
                         "toolExecutionNotifications": [
                             _notification(item) for item in skipped
                         ] + [_error_notification(item) for item in errors],
@@ -129,7 +132,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                     "corroborated": index.corroborated,
                     "nearMisses": index.near_miss_count,
                     "suppressed": len(suppressed),
-                    "degraded": bool(errors),
+                    "degraded": degraded(errors),
                 },
             }
         ],
@@ -161,7 +164,7 @@ def _uri_bases(findings: list[Finding]) -> dict:
 def _error_notification(error) -> dict:
     """Something noir could not read, as a tool notification."""
     return {
-        "level": "warning",
+        "level": "warning" if error.consequential else "note",
         "message": {"text": f"noir could not read everything: {error.message}"},
         "properties": {"tech": error.tech, "source": error.source},
     }
@@ -269,7 +272,7 @@ def _locations(finding: Finding) -> list[dict]:
     physical: list[dict] = []
     seen: set[tuple[str, int | None]] = set()
 
-    for code_path in finding.entry.code_paths():
+    for code_path in finding.code_paths():
         path = code_path.get("path")
         if not path:
             continue

@@ -131,6 +131,44 @@ Notable changes to alibi. The format follows
   code that implements it rather than in whichever contract or gateway file
   happened to arrive first.
 
+- A file passed by name (`alibi scan prod.har`, `openapi.yaml`) was reported
+  at its staged copy -- `/var/folders/.../alibi-x1y2/prod.har`, deleted when
+  the scan ended -- in the terminal and as the SARIF location. It is now
+  reported where it lives.
+- A finding is located in the view its rule is about. Views are read in
+  order within a source, but not across sources, so a SHADOW whose route
+  also sat in a Bruno collection scanned earlier pointed at the `.bru`.
+- A route registered with a spanning parameter (`/files/<path:p>`) is
+  reached by a gateway rule beneath it. `location /files/download/` in front
+  of it was a DANGLING rule and the route UNEXPOSED -- two findings for a
+  rule that reaches exactly the code it should.
+- A routing rule is no longer the other half of a near miss. `location /api/`
+  against a captured `POST /api/cart` is coverage working, and it demoted the
+  ORPHAN on that request as a possible matching failure.
+- The test-code hint only reads directories inside the scanned source. A
+  checkout under `~/work/tests/` was all test code, and the hint advised an
+  `--exclude-path` that excluded the whole scan. Directory names keep their
+  case, since noir's globs are case sensitive (`Tests/` in SwiftPM).
+- The scope hint escapes its prefix: `/v1.0` no longer also keeps `/v1x0`.
+- JSON `degraded` and SARIF `executionSuccessful` count only losses that
+  could have cost endpoints, as the text report does; a skipped symlink no
+  longer fails a CI gate. Each `scan_errors` entry says which it was.
+- Mistakes in what the user supplies are reported, not raised: a
+  non-executable `--noir-bin`, an unreadable or malformed `--rules` or
+  `--views`, an unknown condition, an invalid regex, a missing `when`, a
+  non-integer shift (all found before the scan, not after it), a rule
+  severity off its ladder, and a `--fail-on` the ladder does not have.
+  `--fail-on` now accepts a custom ladder's own rungs.
+- An `.alibi.yml` entry with an unknown key, or no path, rule or view, is an
+  error. It used to be read and discarded, so the suppression was not there.
+- `--snapshot` no longer fails when one path is served on two protocols. The
+  history keys on method and path, and the duplicate row was reported as an
+  unreadable database with the scan unrecorded.
+- A noir that died says how -- its exit status or the signal -- instead of
+  presenting its last progress log line as the reason.
+- The per-group severity mix follows a custom ladder instead of dropping the
+  rungs it did not know.
+
 ### Performance
 
 - Large scans are no longer super-linear. Mount detection compared every lone

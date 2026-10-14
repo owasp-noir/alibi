@@ -123,6 +123,7 @@ default.
 Or gate directly: `alibi scan . ./contracts --fail-on high` exits non-zero when
 a finding reaches that severity. A scan noir could not read in full reports
 `executionSuccessful: false`, so a degraded run does not pass as a clean one.
+A symlink, binary or image noir passed over on purpose does not count.
 
 ## How endpoints are matched
 

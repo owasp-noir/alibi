@@ -34,10 +34,16 @@ class Finding:
     base_severity: str
     entry: Entry
     adjustments: list[Adjustment] = field(default_factory=list)
+    # The views the rule found this endpoint present in, whose files are
+    # the ones the finding is about.
+    about: tuple[str, ...] = ()
 
     @property
     def key(self):
         return self.entry.key
+
+    def code_paths(self) -> list[dict]:
+        return self.entry.code_paths(self.about)
 
     @property
     def grade(self) -> str:
@@ -84,21 +90,86 @@ class Skipped:
     detail: str
 
 
+class RulesError(ValueError):
+    """A ruleset that cannot be used. Reported before noir runs, not after.
+
+    `--rules` is a hand-written file, and a mistake in it used to surface
+    as a traceback -- for a condition typo, only once every view had been
+    scanned and the first finding reached the line that used it.
+    """
+
+
 class RuleSet:
     def __init__(self, data: dict) -> None:
         self.severities: list[str] = data.get(
             "severities", ["info", "low", "medium", "high", "critical"]
         )
-        self.rules: list[dict] = data.get("rules", [])
-        self.adjustments: list[dict] = data.get("adjustments", [])
-        self.suppressions: list[dict] = data.get("suppress", [])
+        self.rules: list[dict] = data.get("rules") or []
+        self.adjustments: list[dict] = data.get("adjustments") or []
+        self.suppressions: list[dict] = data.get("suppress") or []
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> RuleSet:
         # `--rules` arrives as a string; see `ViewMap.load`.
         source = Path(path) if path else _RULES_FILE
-        with source.open(encoding="utf-8") as handle:
-            return cls(yaml.safe_load(handle))
+        try:
+            with source.open(encoding="utf-8") as handle:
+                data = yaml.safe_load(handle)
+        except OSError as exc:
+            raise RulesError(f"cannot read {source}: {exc.strerror or exc}") from exc
+        except yaml.YAMLError as exc:
+            raise RulesError(f"{source} is not valid YAML: {exc}") from exc
+        if not isinstance(data, dict):
+            raise RulesError(f"{source} should be a mapping with a `rules:` list")
+        ruleset = cls(data)
+        ruleset.check()
+        return ruleset
+
+    def check(self) -> None:
+        """Everything `evaluate` would trip over, asked before there is a scan."""
+        for name, section in (("rules", self.rules), ("adjustments", self.adjustments),
+                              ("suppress", self.suppressions)):
+            if not isinstance(section, list) or not all(
+                    isinstance(item, dict) for item in section):
+                raise RulesError(f"`{name}:` should be a list of mappings")
+        if not all("id" in item for item in self.rules + self.adjustments):
+            raise RulesError("every rule and adjustment needs an `id`")
+
+        for rule in self.rules:
+            severity = rule.get("severity", "medium")
+            if severity not in self.severities:
+                raise RulesError(
+                    f"rule {rule['id']} has severity {severity!r}, which is not "
+                    f"on the ladder ({', '.join(self.severities)})")
+
+        # A rule's `when` is optional; an adjustment or suppression without
+        # one is skipped by nothing and read by `_build` and `_suppressed`.
+        whens = [rule.get("when") or {} for rule in self.rules]
+        for item in self.adjustments + self.suppressions:
+            if not isinstance(item.get("when"), dict):
+                raise RulesError(f"{item.get('id', 'a suppression')} needs a "
+                                 f"`when:` mapping")
+            whens.append(item["when"])
+        for item in self.adjustments:
+            try:
+                int(item.get("shift"))
+            except (TypeError, ValueError):
+                raise RulesError(f"adjustment {item.get('id')} needs an integer "
+                                 f"`shift`, not {item.get('shift')!r}") from None
+            signal = item.get("needs_signal") or {}
+            if signal.get("tag_matching"):
+                whens.append({"tag_matching": signal["tag_matching"]})
+
+        for when in whens:
+            if not isinstance(when, dict):
+                raise RulesError(f"`when:` should be a mapping, not {when!r}")
+            self._known(when)
+            if "tag_matching" in when:
+                try:
+                    re.compile(when["tag_matching"])
+                except (re.error, TypeError) as exc:
+                    raise RulesError(f"tag_matching {when['tag_matching']!r} is not "
+                                     f"a valid regular expression: {exc}") from exc
 
     def _shift(self, severity: str, steps: int) -> str:
         try:
@@ -110,6 +181,9 @@ class RuleSet:
 
     def evaluate(self, index: Index,
                  present_views: set[str]) -> tuple[list[Finding], list[Skipped]]:
+        # Once per scan, so a ruleset edited after `load` still fails before
+        # it produces anything rather than per condition, every time.
+        self.check()
         findings: list[Finding] = []
         skipped: list[Skipped] = []
         runnable = []
@@ -358,6 +432,7 @@ class RuleSet:
             base_severity=base,
             entry=entry,
             adjustments=applied,
+            about=tuple(rule.get("present", [])),
         )
 
     # Every key a condition may use. An unrecognised one is a mistake, and it
@@ -371,15 +446,16 @@ class RuleSet:
         "covers_nothing_in", "thin_routing_view",
     })
 
-    def _condition(self, entry: Entry, when: dict, index: Index,
-                   rule: dict | None = None) -> bool:
+    def _known(self, when: dict) -> None:
         unknown = set(when) - self.CONDITIONS
         if unknown:
-            raise ValueError(
+            raise RulesError(
                 f"unknown condition {', '.join(sorted(unknown))} in rules.yml -- "
                 f"known conditions are {', '.join(sorted(self.CONDITIONS))}"
             )
 
+    def _condition(self, entry: Entry, when: dict, index: Index,
+                   rule: dict | None = None) -> bool:
         if "thin_routing_view" in when and not self._thin(index, rule):
             return False
 

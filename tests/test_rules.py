@@ -539,3 +539,96 @@ def test_an_alternative_ruleset_can_be_named_by_path_string(tmp_path):
     alternative.write_text("rules: []\n", encoding="utf-8")
 
     assert RuleSet.load(str(alternative)).rules == []
+
+
+def test_a_ruleset_mistake_is_reported_before_any_scan(tmp_path):
+    """A typo in `--rules` used to be a traceback -- after the scan, for a
+    condition only the first matching finding reached."""
+    from alibi.rules import RulesError
+
+    with pytest.raises(RulesError, match="cannot read"):
+        RuleSet.load(str(tmp_path / "missing.yml"))
+
+    typo = tmp_path / "typo.yml"
+    typo.write_text("adjustments:\n  - id: x\n    when: {tagg: pii}\n    shift: 1\n")
+    with pytest.raises(RulesError, match="unknown condition tagg"):
+        RuleSet.load(str(typo))
+
+    off_ladder = tmp_path / "ladder.yml"
+    off_ladder.write_text("severities: [low, high]\n"
+                          "rules:\n  - {id: X, severity: medium}\n")
+    with pytest.raises(RulesError, match="not on the ladder"):
+        RuleSet.load(str(off_ladder))
+
+
+def test_fail_on_a_severity_the_ruleset_does_not_have_is_refused(tmp_path, capsys):
+    from alibi.cli import EXIT_ERROR, main
+
+    ladder = tmp_path / "rules.yml"
+    ladder.write_text("severities: [low, high]\nrules: []\n")
+
+    assert main(["scan", str(tmp_path), "--rules", str(ladder),
+                 "--fail-on", "critical"]) == EXIT_ERROR
+    assert "not a severity in this ruleset" in capsys.readouterr().err
+
+
+def test_a_finding_is_reported_at_a_file_from_the_view_it_is_about(endpoint, view_map):
+    """A shadow API is a fact about the code, so it is located in the code.
+
+    Observations arrive in the order sources were scanned, and the first file
+    was the one reported -- a SHADOW whose route was also in a Bruno
+    collection pointed at the `.bru`, in SARIF as well as the terminal.
+    """
+    endpoints = [
+        endpoint("/upload", "POST", "bruno",
+                 code_paths=({"path": "collections/upload.bru"},)),
+        endpoint("/upload", "POST", "python_flask",
+                 code_paths=({"path": "app/views.py", "line": 12},)),
+        endpoint("/anchor", "GET", "oas3"),
+        endpoint("/anchor", "GET", "python_flask"),
+    ]
+    findings, _ = evaluate(endpoints, view_map)
+
+    shadow = next(f for f in findings if f.rule_id == "SHADOW" and f.key.path == "/upload")
+    assert shadow.code_paths()[0]["path"] == "app/views.py"
+
+
+def test_a_ruleset_value_that_would_fail_mid_scan_fails_at_load(tmp_path):
+    """Checking condition names was not enough: a bad regex, a missing
+    `when` or a non-numeric shift still waited for the first finding."""
+    from alibi.rules import RulesError
+
+    cases = {
+        "adjustments:\n  - {id: a, when: {tag_matching: '('}, shift: 1}\n": "regular expression",
+        "adjustments:\n  - {id: a, rules: [X], shift: 1}\n": "needs a `when:`",
+        "adjustments:\n  - {id: a, when: {tag: pii}, shift: up}\n": "integer `shift`",
+        "adjustments:\n  - {id: a, when: {tag: pii}, shift: 1,"
+        " needs_signal: {tag_matching: '['}}\n": "regular expression",
+        "rules:\n  - {name: no id}\n": "needs an `id`",
+    }
+    for text, message in cases.items():
+        broken = tmp_path / "rules.yml"
+        broken.write_text(text)
+        with pytest.raises(RulesError, match=message):
+            RuleSet.load(str(broken))
+
+    empty = tmp_path / "empty.yml"
+    empty.write_text("adjustments:\n")
+    assert RuleSet.load(str(empty)).adjustments == []
+
+
+def test_fail_on_accepts_a_custom_ladders_own_rung(tmp_path, capsys, monkeypatch):
+    """argparse offered only the default five, so `severe` was a usage error."""
+    from alibi import collect
+    from alibi.cli import main
+
+    def stop(_):
+        raise collect.NoirNotFound("past the severity check")
+
+    # Stops just after the check, with or without a noir on this machine.
+    monkeypatch.setattr(collect, "find_noir", stop)
+    ladder = tmp_path / "rules.yml"
+    ladder.write_text("severities: [minor, severe]\nrules: []\n")
+
+    main(["scan", str(tmp_path), "--rules", str(ladder), "--fail-on", "severe"])
+    assert "past the severity check" in capsys.readouterr().err
