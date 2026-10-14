@@ -121,11 +121,26 @@ class IgnoreList:
         return kept, dropped
 
 
+_ENTRY_KEYS = frozenset({"path", "rule", "view", "why"})
+
+
 def _entry(item, source) -> IgnoreEntry:
     if not isinstance(item, dict):
         raise IgnoreError(f"every entry under `ignore:` in {source} should be a "
                           f"mapping with a path, rule or view -- found "
                           f"{type(item).__name__}")
+    # The same trap as an unknown condition in rules.yml, from the other
+    # side: `paths: ^/admin/` or an entry holding only a `why` matched
+    # nothing, so a suppression the project believed it had silently was
+    # not there.
+    unknown = set(item) - _ENTRY_KEYS
+    if unknown:
+        raise IgnoreError(f"unknown key {', '.join(sorted(map(str, unknown)))} "
+                          f"under `ignore:` in {source} -- an entry takes "
+                          f"{', '.join(sorted(_ENTRY_KEYS))}")
+    if not any(item.get(key) for key in ("path", "rule", "view")):
+        raise IgnoreError(f"an entry under `ignore:` in {source} names no path, "
+                          f"rule or view, so it would match nothing")
     pattern = item.get("path")
     return IgnoreEntry(
         path=_pattern(pattern, source) if pattern else None,
