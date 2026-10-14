@@ -69,7 +69,8 @@ class Hint:
         38. The one it disagreed about is the mount point -- the endpoint most
         worth keeping in the gRPC-gateway shape this hint appears in.
         """
-        return f"^/(?!{self.prefix.lstrip('/')}(/|$))"
+        # Escaped: a prefix is a path, and `/v1.0` must not also keep `/v1x0`.
+        return f"^/(?!{re.escape(self.prefix.lstrip('/'))}(/|$))"
 
     @property
     def share(self) -> int:
@@ -144,6 +145,9 @@ class TestHint:
 
     @property
     def exclude_globs(self) -> list[str]:
+        # The names keep the case they were found in. Noir's globs are case
+        # sensitive, and a SwiftPM `Tests/` handed back as `**/tests/**`
+        # excluded nothing on Linux.
         return [f"**/{name}/**" for name in self.directories]
 
 
@@ -175,7 +179,7 @@ def from_tests(findings: list, index=None) -> TestHint | None:
             path = _inside_root(code_path.get("path") or "",
                                 code_path.get("source_root") or "")
             for match in _TEST_SEGMENT.finditer(path):
-                seen.add(match.group(2).lower())
+                seen.add(match.group(2))
                 matched = True
         if matched:
             from_test += 1
@@ -207,7 +211,7 @@ def _load_bearing(index) -> set[str]:
                 path = _inside_root(code_path.get("path") or "",
                                     observation.raw.source_root)
                 for match in _TEST_SEGMENT.finditer(path):
-                    names.add(match.group(2).lower())
+                    names.add(match.group(2))
     return names
 
 

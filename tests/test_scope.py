@@ -323,3 +323,23 @@ def test_a_subtree_the_other_view_does_hold_is_not_missing(endpoint, view_map):
 
     index, findings, ruleset = scan(endpoints, view_map)
     assert missing_subtree(findings, index, ruleset, floor=10) is None
+
+
+def test_hint_commands_name_what_they_measured(endpoint, view_map):
+    """A prefix is a path, not a pattern, and a directory keeps its case."""
+    from alibi.scope import Hint, applies, from_tests
+
+    hint = Hint(view="doc", prefix="/v1.0", concentration=1.0, inside=0, outside=10)
+    assert applies(hint.ignore_pattern, "/v1x0/users")
+    assert not applies(hint.ignore_pattern, "/v1.0/users")
+
+    endpoints = [
+        endpoint(f"/fixture{i}", "GET", "swift_vapor",
+                 code_paths=({"path": f"Tests/AppTests/case{i}.swift"},))
+        for i in range(15)
+    ]
+    endpoints += [endpoint("/anchor", "GET", "oas3"),
+                  endpoint("/anchor", "GET", "swift_vapor")]
+    index, findings, _ = scan(endpoints, view_map)
+
+    assert from_tests(findings, index).exclude_globs == ["**/Tests/**"]
