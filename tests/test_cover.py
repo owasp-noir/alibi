@@ -4,7 +4,7 @@ from alibi.normalize import Key
 
 def test_a_prefix_reaches_everything_beneath_it():
     """`location /api/` is one rule standing for a whole subtree."""
-    rule = Rule(Key("ANY", "/api"), "gateway", prefix=True)
+    rule = Rule(Key("ANY", "/api"), prefix=True)
     assert rule.reaches(Key("GET", "/api/v1/users"))
     assert rule.reaches(Key("POST", "/api/v1/users/{}/avatar"))
     assert rule.reaches(Key("GET", "/api"))
@@ -12,13 +12,13 @@ def test_a_prefix_reaches_everything_beneath_it():
 
 
 def test_a_rule_bound_to_one_verb_does_not_reach_the_others():
-    rule = Rule(Key("GET", "/api"), "gateway", prefix=True)
+    rule = Rule(Key("GET", "/api"), prefix=True)
     assert rule.reaches(Key("GET", "/api/v1/x"))
     assert not rule.reaches(Key("POST", "/api/v1/x"))
 
 
 def test_any_reaches_every_verb():
-    rule = Rule(Key("ANY", "/api"), "gateway", prefix=True)
+    rule = Rule(Key("ANY", "/api"), prefix=True)
     for method in ("GET", "POST", "DELETE", "QUERY"):
         assert rule.reaches(Key(method, "/api/x"))
 
@@ -29,7 +29,7 @@ def test_root_is_not_treated_as_coverage():
     Counting it would mark every endpoint in every repository as exposed and
     silently disable the rule that depends on coverage.
     """
-    rule = Rule(Key("ANY", "/"), "gateway", prefix=True)
+    rule = Rule(Key("ANY", "/"), prefix=True)
     assert not rule.reaches(Key("GET", "/anything"))
 
 
@@ -44,7 +44,7 @@ def test_a_catch_all_reaches_nothing_not_even_the_root():
     opposite answers.
     """
     for spelling, method in (("/", "GET"), ("/", "ANY"), ("/*", "ANY")):
-        rule = Rule(Key(method, spelling), "gateway", prefix=True)
+        rule = Rule(Key(method, spelling), prefix=True)
         assert not rule.reaches(Key("GET", "/"))
         assert not rule.reaches(Key("GET", "/*"))
         assert not rule.reaches(Key("GET", "/anything"))
@@ -117,7 +117,7 @@ def test_indexed_coverage_agrees_with_the_matcher():
     for _ in range(2000):
         rules = [
             Rule(key=Key(rng.choice(methods), "/" + "/".join(_random_parts(rng))),
-                 view="gateway", prefix=rng.random() < 0.8)
+                 prefix=rng.random() < 0.8)
             for _ in range(rng.randint(0, 6))
         ]
         targets = [Key(rng.choice(methods[:2]), "/" + "/".join(_random_parts(rng)))
@@ -139,7 +139,7 @@ def test_an_endpoint_that_spans_segments_is_reached_by_a_rule_beneath_it():
     """
     from alibi.cover import Coverage, KeySet
 
-    rule = Rule(key=Key("ANY", "/files/download"), view="gateway", prefix=True)
+    rule = Rule(key=Key("ANY", "/files/download"), prefix=True)
     route = Key("GET", "/files/*")
 
     assert rule.reaches(route)
@@ -153,7 +153,7 @@ def test_a_code_fallback_is_reached_by_no_rule():
     one fronting another service included -- would have "reached" the code."""
     from alibi.cover import Coverage, KeySet
 
-    rule = Rule(key=Key("ANY", "/legacy/v0"), view="gateway", prefix=True)
+    rule = Rule(key=Key("ANY", "/legacy/v0"), prefix=True)
     fallback = Key("GET", "/*")
 
     assert not rule.reaches(fallback)

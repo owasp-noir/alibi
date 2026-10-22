@@ -14,7 +14,7 @@ near miss before it is allowed to become a finding.
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -132,9 +132,6 @@ class Index:
     # Memo for `key_set`, on the same grounds.
     _key_sets: dict[str, KeySet] = field(default_factory=dict, repr=False)
 
-    def by_view(self, view: str) -> list[Entry]:
-        return [e for e in self.entries.values() if view in e.views]
-
     def by_source(self, sources: list[str]) -> list[tuple[str, int, list[str]]]:
         """What each path the user named actually contributed.
 
@@ -157,6 +154,18 @@ class Index:
         return [(name, len(keys.get(name, ())), sorted(views.get(name, ())))
                 for name in sources]
 
+    @property
+    def view_counts(self) -> dict[str, int]:
+        """How many endpoints each view holds.
+
+        Sorted, so the order the views are listed in does not depend on the
+        interpreter's hash seed: `entry.views` is a set.
+        """
+        counts: Counter[str] = Counter()
+        for entry in self.entries.values():
+            counts.update(sorted(entry.views))
+        return dict(counts)
+
     def keys_in(self, view: str) -> list[Key]:
         return [e.key for e in self.entries.values() if view in e.views]
 
@@ -167,11 +176,9 @@ class Index:
         every code endpoint: every rule against every key. With the keys
         indexed once per scan, a plain rule is a set lookup.
         """
-        found = self._key_sets.get(view)
-        if found is None:
-            found = KeySet(self.keys_in(view))
-            self._key_sets[view] = found
-        return found
+        if view not in self._key_sets:
+            self._key_sets[view] = KeySet(self.keys_in(view))
+        return self._key_sets[view]
 
     def population(self, view: str) -> int:
         return sum(1 for e in self.entries.values() if view in e.views)
@@ -263,13 +270,9 @@ class Index:
         On authentik that was 1,596 recomputations, 56 million path matches,
         and 26 of the 27 seconds a scan took.
         """
-        cached = self._coverage_stats.get(target)
-        if cached is not None:
-            return cached
-
-        stats = self._compute_coverage_stats(target)
-        self._coverage_stats[target] = stats
-        return stats
+        if target not in self._coverage_stats:
+            self._coverage_stats[target] = self._compute_coverage_stats(target)
+        return self._coverage_stats[target]
 
     def _compute_coverage_stats(self, target: str) -> dict[str, tuple[int, int, int]]:
         targets = [key for key in self.keys_in(target) if key.http]

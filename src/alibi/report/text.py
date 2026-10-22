@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
+import textwrap
+from collections import Counter
 from pathlib import Path
 
 from ..index import Entry, Index
@@ -56,13 +58,6 @@ def render(
     def out(line=""):
         print(line, file=stream)
 
-    # Sorted, so the order the views are listed in does not depend on the
-    # interpreter's hash seed: `entry.views` is a set.
-    view_counts: dict[str, int] = {}
-    for entry in index.entries.values():
-        for view in sorted(entry.views):
-            view_counts[view] = view_counts.get(view, 0) + 1
-
     out()
     out(paint("alibi", "bold") + paint(
         f"  ·  {len(sources)} source{'s' if len(sources) != 1 else ''}"
@@ -99,7 +94,7 @@ def render(
     out()
     out("  " + "   ".join(
         f"{view} {paint(str(count), 'bold')}"
-        for view, count in sorted(view_counts.items(), key=lambda kv: -kv[1])
+        for view, count in sorted(index.view_counts.items(), key=lambda kv: -kv[1])
     ))
 
     if len(sources) > 1:
@@ -162,7 +157,7 @@ def render(
         out()
         return
 
-    for rule_id in _rule_order(findings):
+    for rule_id in dict.fromkeys(f.rule_id for f in findings):
         group = [f for f in findings if f.rule_id == rule_id]
         head = group[0]
         out()
@@ -253,21 +248,11 @@ def _breakdown(group: list[Finding], severities: list[str]) -> str:
     five dropped every rung a custom ladder named, and the counts no longer
     added up to the group.
     """
-    counts: dict[str, int] = {}
-    for finding in group:
-        counts[finding.severity] = counts.get(finding.severity, 0) + 1
+    counts = Counter(finding.severity for finding in group)
     if len(counts) < 2:
         return ""
     parts = [f"{counts[s]} {s}" for s in reversed(severities) if s in counts]
     return "  ·  " + ", ".join(parts)
-
-
-def _rule_order(findings: list[Finding]) -> list[str]:
-    seen: list[str] = []
-    for finding in findings:
-        if finding.rule_id not in seen:
-            seen.append(finding.rule_id)
-    return seen
 
 
 def _render_finding(finding: Finding, paint: Painter, out) -> None:
@@ -477,12 +462,10 @@ def _render_suppressed(suppressed: list, paint: Painter, out) -> None:
     if not suppressed:
         return
     out()
-    reasons: dict[str, int] = {}
-    for _, entry in suppressed:
-        reasons[entry.why or "no reason given"] = reasons.get(entry.why or "no reason given", 0) + 1
+    reasons = Counter(entry.why or "no reason given" for _, entry in suppressed)
     out(paint(f"{len(suppressed)} finding"
               f"{'s' if len(suppressed) != 1 else ''} suppressed", "dim"))
-    for why, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+    for why, count in reasons.most_common():
         out(paint(f"  {count:>4}  {why}", "dim"))
 
 
@@ -541,17 +524,9 @@ def _trim(message: str, limit: int = 160) -> str:
 
 
 def _wrap(text: str, width: int = 74, indent: str = "  ") -> str:
-    words = text.split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        # A word longer than the line -- an absolute path, usually -- goes
-        # on a line of its own instead of leaving an empty one behind it.
-        if current and len(current) + len(word) + 1 > width:
-            lines.append(current)
-            current = word
-        else:
-            current = f"{current} {word}".strip()
-    if current:
-        lines.append(current)
-    return f"\n{indent}".join(lines)
+    # A word longer than the line -- an absolute path, usually -- goes on a
+    # line of its own, unbroken. Whitespace collapses first, so a run of
+    # spaces in noir's message cannot widen a line.
+    return f"\n{indent}".join(textwrap.wrap(" ".join(text.split()), width,
+                                            break_long_words=False,
+                                            break_on_hyphens=False))

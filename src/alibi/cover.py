@@ -116,7 +116,6 @@ class Rule:
     """One routing rule, and what it reaches."""
 
     key: Key
-    view: str
     prefix: bool
 
     def reaches(self, target: Key) -> bool:
@@ -218,7 +217,7 @@ class Coverage:
             if entry.key.catch_all:
                 catch_alls += 1
                 continue
-            rules.append(Rule(key=entry.key, view=view, prefix=True))
+            rules.append(Rule(key=entry.key, prefix=True))
         return cls(rules, catch_alls)
 
     def __len__(self) -> int:
@@ -228,13 +227,6 @@ class Coverage:
     def selective(self) -> bool:
         """Does any rule here name something narrower than everything?"""
         return bool(self._rules)
-
-    def reaching(self, target: Key) -> Rule | None:
-        """Which rule reaches this, if any. Linear; `covers` is the fast ask."""
-        for rule in self._rules:
-            if rule.reaches(target):
-                return rule
-        return None
 
     def covers(self, target: Key) -> bool:
         answer = self._answers.get(target)

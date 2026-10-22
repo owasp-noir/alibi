@@ -52,13 +52,6 @@ def _by_view(index: Index) -> dict[str, list[dict]]:
 def build(index: Index, findings: list[Finding], skipped: list[Skipped],
           sources: list[str], errors: list = (), suppressed: list = (),
           ruleset=None, endpoints: bool = False) -> dict:
-    # Sorted, so the order the views are listed in does not depend on the
-    # interpreter's hash seed: `entry.views` is a set.
-    view_counts: dict[str, int] = {}
-    for entry in index.entries.values():
-        for view in sorted(entry.views):
-            view_counts[view] = view_counts.get(view, 0) + 1
-
     document = {
         "sources": [
             {"name": name, "endpoints": count, "views": views}
@@ -78,7 +71,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
             # distinction, so the two formats agree on whether a scan is whole.
             "degraded": degraded(errors),
             "suppressed": len(suppressed),
-            "views": view_counts,
+            "views": index.view_counts,
             "coverage": {
                 view: {"rules": rules, "reaches": reached, "of": total}
                 for view, (rules, reached, total) in index.coverage_stats().items()

@@ -75,12 +75,12 @@ def test_a_project_carries_its_own_suppressions(tmp_path, endpoint, view_map):
     )
 
     ignores = IgnoreList.discover([str(tmp_path)])
-    assert len(ignores) == 1
+    assert len(ignores.entries) == 1
     assert ignores.entries[0].why == "internal-only admin surface"
 
 
 def test_discovery_finds_nothing_without_complaint(tmp_path):
-    assert len(IgnoreList.discover([str(tmp_path)])) == 0
+    assert IgnoreList.discover([str(tmp_path)]).entries == []
 
 
 def test_a_suppression_that_cannot_be_read_is_reported_not_raised(tmp_path):

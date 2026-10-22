@@ -39,6 +39,17 @@ class ViewsError(ValueError):
     """A view map that cannot be read, reported rather than raised at the user."""
 
 
+def read_yaml(source: Path, error: type[Exception]):
+    """Parse a hand-written YAML file, failing as `error` rather than a traceback."""
+    try:
+        with source.open(encoding="utf-8") as handle:
+            return yaml.safe_load(handle)
+    except OSError as exc:
+        raise error(f"cannot read {source}: {exc.strerror or exc}") from exc
+    except yaml.YAMLError as exc:
+        raise error(f"{source} is not valid YAML: {exc}") from exc
+
+
 class ViewMap:
     def __init__(self, data: dict) -> None:
         self._default: str = data.get("default", "code")
@@ -55,13 +66,7 @@ class ViewMap:
         # `--views` arrives as a string, and a string has no `open`. Every
         # run with an alternative map fell over on that before noir started.
         source = Path(path) if path else _VIEWS_FILE
-        try:
-            with source.open(encoding="utf-8") as handle:
-                data = yaml.safe_load(handle)
-        except OSError as exc:
-            raise ViewsError(f"cannot read {source}: {exc.strerror or exc}") from exc
-        except yaml.YAMLError as exc:
-            raise ViewsError(f"{source} is not valid YAML: {exc}") from exc
+        data = read_yaml(source, ViewsError)
         if not isinstance(data, dict):
             raise ViewsError(f"{source} should be a mapping with a `techs:` table")
         return cls(data)
@@ -82,9 +87,6 @@ class ViewMap:
         never be compared as plain sets.
         """
         return self._views.get(view, {}).get("kind") == "predicate"
-
-    def describe(self, view: str) -> str:
-        return self._views.get(view, {}).get("description", "")
 
     def techs_by_view(self, catalog: dict) -> dict[str, list[str]]:
         """Bucket every technology this noir build knows into its view.
