@@ -176,7 +176,11 @@ def record(db_path: Path | str, index: Index, findings: list[Finding],
     waiting for a clock to move.
     """
     path = Path(db_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SnapshotError(f"cannot create {path.parent}: "
+                            f"{exc.strerror or exc}") from exc
 
     with _open(path) as conn:
         cursor = conn.execute(
@@ -416,9 +420,24 @@ def _open(path: Path) -> Iterator[sqlite3.Connection]:
     `sqlite3.Connection` is its own context manager, but that one only ends the
     transaction -- it leaves the connection open.
     """
-    conn = sqlite3.connect(path)
+    # Inside the handler: a directory, or a path nobody can write, fails
+    # here rather than on the first statement.
+    try:
+        conn = sqlite3.connect(path)
+    except sqlite3.DatabaseError as exc:
+        raise SnapshotError(f"cannot open {path}: {exc}") from exc
     try:
         conn.execute("PRAGMA foreign_keys = ON")
+        # No marker is a new database only when nothing else is in it. A
+        # file holding some other program's tables is the wrong path, and
+        # `alibi history` aimed at one used to add six tables of its own --
+        # a `meta` table of its own included, since that name is common.
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if tables and ("meta" not in tables or conn.execute(
+                "SELECT 1 FROM meta WHERE key = 'schema_version'").fetchone() is None):
+            raise SnapshotError(f"{path} is a database, but not an alibi "
+                                f"snapshot -- refusing to write to it.")
         conn.executescript(_META_SCHEMA)
         _check_version(conn, path)
         conn.executescript(_SCHEMA)
@@ -445,8 +464,8 @@ def _check_version(conn: sqlite3.Connection, path: Path) -> None:
         conn.commit()
         return
 
-    found = int(row[0])
-    if found != SCHEMA_VERSION:
+    found = row[0]
+    if found != str(SCHEMA_VERSION):
         raise SnapshotError(
             f"{path} was written at schema version {found}, and this alibi "
             f"speaks version {SCHEMA_VERSION}. A snapshot is a record of past "

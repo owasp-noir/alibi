@@ -141,6 +141,13 @@ def _entry(item, source) -> IgnoreEntry:
     if not any(item.get(key) for key in ("path", "rule", "view")):
         raise IgnoreError(f"an entry under `ignore:` in {source} names no path, "
                           f"rule or view, so it would match nothing")
+    # `rule: [SHADOW, PHANTOM]` reads naturally and compared unequal to every
+    # rule id, so it suppressed nothing -- the same silent trap again.
+    for key in ("rule", "view"):
+        if item.get(key) is not None and not isinstance(item[key], str):
+            raise IgnoreError(f"`{key}:` under `ignore:` in {source} names one "
+                              f"{key}, not {type(item[key]).__name__} -- write "
+                              f"one entry per {key}")
     pattern = item.get("path")
     return IgnoreEntry(
         path=_pattern(pattern, source) if pattern else None,

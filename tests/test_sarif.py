@@ -458,3 +458,15 @@ def test_several_roots_leave_the_base_undeclared(view_map):
     ]
     assert "routers/router.go" in uris
     assert "handlers/h.go" in uris
+
+
+def test_a_mount_is_doubted_as_a_mount_not_as_a_missing_counterpart(endpoint, view_map):
+    """A mount label has no other endpoint; the message said `None in doc`."""
+    endpoints = [endpoint("/api", "GET", "python_flask")]
+    endpoints += [endpoint(f"/api/v1/thing{i}", "GET", "oas3") for i in range(3)]
+    mounted = [r for r in results(emit(endpoints, view_map))
+               if r["ruleId"] == "SHADOW"]
+
+    text = mounted[0]["message"]["text"]
+    assert "looks like a mount" in text
+    assert "None" not in text

@@ -22,6 +22,12 @@ from alibi.cli import EXIT_ERROR, main
         ["--only-techs=python_flask,oas3"],
         ["--exclude-techs", "har"],
         ["--exclude-techs=oas3"],
+        ["-t", "python_flask"],
+        ["-tpython_flask"],
+        ["--techs", "python_flask"],
+        ["--techs=python_fastapi"],
+        ["-b", "../other"],
+        ["--base-path=../other"],
     ],
 )
 def test_each_dangerous_class_is_refused(extra):
@@ -40,8 +46,7 @@ def test_each_dangerous_class_is_refused(extra):
         ["--tls-skip-verify"],
         ["--verbose"],
         ["--no-log"],
-        ["-t", "python_flask"],
-        ["--techs", "python_flask"],
+        ["-T"],
         ["--fail-on", "added"],
     ],
 )

@@ -48,6 +48,32 @@ Notable changes to alibi. The format follows
 
 ### Fixed
 
+- `-t` / `--techs` and `-b` / `--base-path` are refused in noir passthrough.
+  `-t` was allowed as harmless and is the opposite: it adds the analyzer to
+  every view's scan, and noir's (method, url) dedup then folds the
+  specification into the code. A FastAPI route and the OpenAPI path
+  documenting it scanned as code alone -- no doc view, nothing corroborated,
+  exit 0. `-b` added its path to every scan of every source, counting its
+  endpoints once per source; name it as an alibi PATH instead.
+
+- A `null` technology, method, url, protocol, endpoint list or error field
+  in noir's JSON is read as absent. A `null` technology reached `sorted` beside strings and the text
+  report died with a TypeError. JSON that is not an endpoint document is
+  reported as a noir failure rather than an AttributeError.
+
+- SARIF doubted a mount as `Uncertain: None in doc -- ... may be a matching
+  failure`. A mount has no counterpart; the message now says what it is.
+
+- Snapshot paths that cannot be opened are reported, not raised: a directory
+  given to `alibi history`, a `--snapshot` whose parent cannot be created,
+  and a schema marker that is not a number were all tracebacks. Another
+  program's SQLite database -- one with a `meta` table of its own included --
+  is refused before anything is written -- `alibi
+  history` aimed at one used to add alibi's six tables to it.
+
+- An `.alibi.yml` entry with a list for `rule:` or `view:` is refused. It
+  compared unequal to every finding, so it suppressed nothing, silently.
+
 - `--noir-arg` and a bare `--` refuse flags that would make a scan look
   clean for the wrong reason: `-f` / `--format` (breaks the JSON alibi
   parses), `--diff-ref` / `--diff-path` (Diff Mode), and `--only-techs` /
