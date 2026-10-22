@@ -485,3 +485,44 @@ def test_one_path_on_two_protocols_is_recorded_not_refused(db, view_map):
     snapshot.record(db, index, [], ["s"], [], when=DAY1)
 
     assert snapshot.timeline(db, "GET", "/socket").first_seen == {"code": DAY1}
+
+
+def test_a_directory_is_named_rather_than_crashed_on(tmp_path):
+    with pytest.raises(snapshot.SnapshotError, match="cannot open"):
+        snapshot.history(tmp_path)
+
+
+def test_a_snapshot_that_cannot_be_created_is_reported(tmp_path, view_map):
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    with pytest.raises(snapshot.SnapshotError, match="cannot create"):
+        snapshot.record(blocker / "sub" / "snapshots.db", build([], view_map), [], [])
+
+
+@pytest.mark.parametrize("schema", [
+    "CREATE TABLE users (id INTEGER)",
+    # `meta` is a common name; having one does not make a database ours.
+    "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)",
+])
+def test_another_program_s_database_is_refused_and_left_alone(tmp_path, schema):
+    """`alibi history` on the wrong .db used to write its schema into it."""
+    foreign = tmp_path / "app.db"
+    with sqlite3.connect(foreign) as conn:
+        conn.execute(schema)
+    before = sqlite3.connect(foreign).execute(
+        "SELECT name FROM sqlite_master").fetchall()
+
+    with pytest.raises(snapshot.SnapshotError, match="not an alibi snapshot"):
+        snapshot.history(foreign)
+
+    assert sqlite3.connect(foreign).execute(
+        "SELECT name FROM sqlite_master").fetchall() == before
+
+
+def test_a_version_marker_that_is_not_a_number_is_refused(db, record, endpoint):
+    record([endpoint("/a", "GET", "python_flask")], DAY1)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE meta SET value = 'abc' WHERE key = 'schema_version'")
+
+    with pytest.raises(snapshot.SnapshotError, match="schema version abc"):
+        snapshot.history(db)

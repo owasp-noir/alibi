@@ -148,3 +148,11 @@ def test_a_bad_ignore_pattern_does_not_cost_the_scan(monkeypatch, capsys):
 
     assert cli.main(["scan", ".", "--ignore", "["]) == cli.EXIT_ERROR
     assert "not a valid regular expression" in capsys.readouterr().err
+
+
+def test_a_list_where_one_rule_belongs_is_refused(tmp_path):
+    """`rule: [SHADOW, PHANTOM]` compared unequal to every rule and silenced nothing."""
+    config = tmp_path / ".alibi.yml"
+    config.write_text("ignore:\n  - rule: [SHADOW, PHANTOM]\n")
+    with pytest.raises(IgnoreError, match="names one rule, not list"):
+        IgnoreList.load(config)

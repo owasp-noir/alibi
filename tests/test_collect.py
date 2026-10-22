@@ -311,3 +311,28 @@ def test_a_file_name_is_not_a_reason_to_call_a_loss_benign():
                                       "first error: file too large")
     assert named.consequential is True
     assert collect.degraded([named]) is True
+
+
+def test_fields_noir_writes_as_null_read_as_absent(tmp_path):
+    """A `null` technology reached `sorted` beside strings and failed the report."""
+    noir = fake_noir(tmp_path, {"endpoints": [
+        {"url": None, "method": None, "protocol": None,
+         "details": {"technology": None}},
+    ]})
+    found = collect.scan(collect.Source(path=str(tmp_path)), noir).endpoints[0]
+    assert (found.url, found.method, found.technology, found.protocol) == (
+        "", "", "", "http")
+
+
+def test_null_lists_and_error_fields_read_as_absent(tmp_path):
+    noir = fake_noir(tmp_path, {"endpoints": None,
+                                "errors": [{"tech": None, "message": "lost"}]})
+    result = collect.scan(collect.Source(path=str(tmp_path)), noir)
+    assert result.endpoints == []
+    assert result.errors[0].tech == ""
+
+
+def test_json_that_is_not_an_endpoint_document_is_an_error(tmp_path):
+    noir = fake_noir(tmp_path, [])
+    with pytest.raises(collect.NoirFailed, match="not an endpoint document"):
+        collect.scan(collect.Source(path=str(tmp_path)), noir)

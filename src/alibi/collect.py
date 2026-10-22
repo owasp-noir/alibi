@@ -83,6 +83,22 @@ _DANGEROUS_NOIR_ARGS: tuple[tuple[tuple[str, ...], str], ...] = (
         "strips technologies from noir's result after detection, undoing the "
         "per-view isolation alibi relies on",
     ),
+    (
+        # Not a harmless addition. A code analyzer added to the doc view's
+        # scan meets the specification in noir's (method, url) dedup, and the
+        # specification loses: a FastAPI route and the OpenAPI path it
+        # documents came back as code alone, with no doc view at all.
+        ("-t", "--techs"),
+        "adds analyzers to every view's scan, so code analyzers run beside "
+        "the specification, capture and gateway readers and noir's dedup "
+        "drops what they agree on -- a whole view can vanish",
+    ),
+    (
+        ("-b", "--base-path"),
+        "adds the path to every view scan of every source, so its endpoints "
+        "are counted once per source and reported under the wrong one; name "
+        "it as an alibi PATH instead",
+    ),
 )
 
 
@@ -122,8 +138,8 @@ def _flag_name(token: str) -> str:
         body = token[1:]
         if "=" in body:
             return "-" + body.split("=", 1)[0]
-        # `-f` alone, or `-fjson` with the value glued on. Only `-f` is on
-        # the denylist among short options, so reading the first letter is
+        # `-f` alone, or `-fjson` with the value glued on. Every short option
+        # on the denylist takes a value, so reading the first letter is
         # enough; clusters like `-abc` are not something noir accepts.
         return "-" + body[0]
     return ""
@@ -394,14 +410,17 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
             f"noir produced no JSON for {source.path}. "
             f"Check that the path exists and that this noir build supports `-f json`."
         ) from exc
+    if not isinstance(document, dict):
+        raise NoirFailed(f"noir's JSON for {source.path} is not an endpoint "
+                         f"document (got {type(document).__name__})")
 
     return ScanResult(
         endpoints=[_convert(item, source)
-                   for item in document.get("endpoints", [])],
+                   for item in (document.get("endpoints") or [])],
         errors=[
             ScanError(
-                tech=str(item.get("tech", "")),
-                message=str(item.get("message", "")),
+                tech=str(item.get("tech") or ""),
+                message=str(item.get("message") or ""),
                 source=source.name,
             )
             for item in (document.get("errors") or [])
@@ -478,17 +497,19 @@ def scan_views(source: Source, noir_bin: str, techs_by_view: dict[str, list[str]
 
 def _convert(item: dict, source: Source) -> RawEndpoint:
     details = item.get("details") or {}
+    # `or`, not a `.get` default: noir writes `null` for a field it has no
+    # value for, and a None technology failed the first `sorted` that met it.
     return RawEndpoint(
-        url=item.get("url", ""),
-        method=item.get("method", ""),
-        technology=details.get("technology", ""),
+        url=item.get("url") or "",
+        method=item.get("method") or "",
+        technology=details.get("technology") or "",
         source=source.name,
         tags=tuple(_tag_names(item.get("tags") or [])),
         params=tuple(item.get("params") or []),
         code_paths=tuple(_unstage(cp, source)
                          for cp in details.get("code_paths") or []),
         internal=bool(item.get("internal", False)),
-        protocol=item.get("protocol", "http"),
+        protocol=item.get("protocol") or "http",
         # A file names no checkout, and its own directory is the wrong one:
         # `api/openapi.yaml` scanned beside the repository root it lives in
         # became `openapi.yaml` in SARIF, which code scanning cannot place.

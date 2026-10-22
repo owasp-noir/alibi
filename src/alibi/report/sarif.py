@@ -354,6 +354,11 @@ def _message(finding: Finding) -> str:
 
     if finding.uncertain:
         near = entry.near_misses[0]
+        # A mount label has no counterpart, and "None in doc" is not one.
+        if near.other is None:
+            lines.append(f"Uncertain: {near.reason}, so this may not be an "
+                         f"endpoint of its own.")
+            return "\n".join(lines)
         lines.append(
             f"Uncertain: {near.other} in {', '.join(sorted(near.other_views))} "
             f"-- {near.reason}. This may be a matching failure inside alibi "
