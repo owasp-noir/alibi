@@ -27,9 +27,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -248,12 +249,10 @@ class RawEndpoint:
     technology: str
     source: str
     tags: tuple[str, ...] = ()
-    params: tuple[dict, ...] = ()
     code_paths: tuple[dict, ...] = ()
     internal: bool = False
     protocol: str = "http"
     source_root: str = ""
-    raw: dict = field(default_factory=dict)
 
 
 def sources(paths: list[str]) -> list[Source]:
@@ -269,9 +268,7 @@ def sources(paths: list[str]) -> list[Source]:
     A basename shared by more than one path falls back to the path as typed.
     """
     built = [Source(path=path) for path in paths]
-    taken: dict[str, int] = {}
-    for source in built:
-        taken[source.name] = taken.get(source.name, 0) + 1
+    taken = Counter(source.name for source in built)
     for source, path in zip(built, paths, strict=True):
         if taken[source.name] > 1:
             source.name = path
@@ -505,7 +502,6 @@ def _convert(item: dict, source: Source) -> RawEndpoint:
         technology=details.get("technology") or "",
         source=source.name,
         tags=tuple(_tag_names(item.get("tags") or [])),
-        params=tuple(item.get("params") or []),
         code_paths=tuple(_unstage(cp, source)
                          for cp in details.get("code_paths") or []),
         internal=bool(item.get("internal", False)),
@@ -515,7 +511,6 @@ def _convert(item: dict, source: Source) -> RawEndpoint:
         # became `openapi.yaml` in SARIF, which code scanning cannot place.
         # Left empty, reports fall back to the working directory.
         source_root=source.root if source.path == source.root else "",
-        raw=item,
     )
 
 

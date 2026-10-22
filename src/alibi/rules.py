@@ -6,11 +6,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
-
 from .cover import Rule as CoverRule
 from .index import Entry, Index
 from .scope import realign
+from .views import read_yaml
 
 _RULES_FILE = Path(__file__).with_name("rules.yml")
 
@@ -112,13 +111,7 @@ class RuleSet:
     def load(cls, path: str | Path | None = None) -> RuleSet:
         # `--rules` arrives as a string; see `ViewMap.load`.
         source = Path(path) if path else _RULES_FILE
-        try:
-            with source.open(encoding="utf-8") as handle:
-                data = yaml.safe_load(handle)
-        except OSError as exc:
-            raise RulesError(f"cannot read {source}: {exc.strerror or exc}") from exc
-        except yaml.YAMLError as exc:
-            raise RulesError(f"{source} is not valid YAML: {exc}") from exc
+        data = read_yaml(source, RulesError)
         if not isinstance(data, dict):
             raise RulesError(f"{source} should be a mapping with a `rules:` list")
         ruleset = cls(data)
@@ -346,10 +339,9 @@ class RuleSet:
             return sum(1 for key in index.keys_in(right) if left_cover.covers(key))
         if right_cover is not None and left_cover is None:
             return sum(1 for key in index.keys_in(left) if right_cover.covers(key))
-        if left_cover is not None and right_cover is not None:
-            # Two routing views. Neither enumerates endpoints, so the only
-            # honest test is whether their rules describe the same paths.
-            return index.overlap(left, right)
+        # Two endpoint sets share members. Two routing views enumerate no
+        # endpoints, so the only honest test there is the same: whether their
+        # rules describe the same paths.
         return index.overlap(left, right)
 
     def _thin(self, index: Index, rule: dict | None) -> bool:
@@ -471,7 +463,7 @@ class RuleSet:
             # is not a dangling route, however little it resembles any single
             # endpoint key.
             target = when["covers_nothing_in"]
-            reach = CoverRule(key=entry.key, view="", prefix=True)
+            reach = CoverRule(key=entry.key, prefix=True)
             if index.key_set(target).reached_by(reach):
                 return False
 

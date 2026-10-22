@@ -22,6 +22,7 @@ the measurement and the command, and makes the call.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -81,11 +82,10 @@ def _dominant_prefix(paths: list[str]) -> tuple[str, float] | None:
     """The first segment that most of these paths share, and how much of them."""
     if not paths:
         return None
-    counts: dict[str, int] = {}
+    counts: Counter[str] = Counter()
     for path in paths:
         head = path.split("/")
-        prefix = f"/{head[1]}" if len(head) > 1 and head[1] else "/"
-        counts[prefix] = counts.get(prefix, 0) + 1
+        counts[f"/{head[1]}" if len(head) > 1 and head[1] else "/"] += 1
 
     prefix, count = max(counts.items(), key=lambda kv: kv[1])
     if prefix in ("/", "/*", "/{}"):
@@ -151,7 +151,7 @@ class TestHint:
         return [f"**/{name}/**" for name in self.directories]
 
 
-def from_tests(findings: list, index=None) -> TestHint | None:
+def from_tests(findings: list, index: Index) -> TestHint | None:
     """Are most of these findings about code that never ships?
 
     Directus keeps e2e snapshots listing every collection its test suite
@@ -197,11 +197,8 @@ def from_tests(findings: list, index=None) -> TestHint | None:
                     directories=suggestable)
 
 
-def _load_bearing(index) -> set[str]:
+def _load_bearing(index: Index) -> set[str]:
     """Directory names some view other than code is reached through."""
-    if index is None:
-        return set()
-
     names: set[str] = set()
     for entry in index.entries.values():
         for observation in entry.observations:
@@ -233,11 +230,6 @@ def _inside_root(path: str, root: str) -> str:
         except ValueError:
             pass
     return path
-
-
-def applies(pattern: str, path: str) -> bool:
-    """Used by the tests to confirm a suggested pattern does what it says."""
-    return bool(re.search(pattern, path))
 
 
 # --- when two views part company along a prefix --------------------------------
@@ -305,19 +297,19 @@ def realign(index: Index, left: str, right: str, floor: int) -> Realignment | No
         targets = {(k.method, k.path) for k in index.keys_in(other) if k.http}
         mine = [k for k in index.keys_in(view) if k.http]
         for depth in range(1, MAX_PREFIX_SEGMENTS + 1):
-            aligned: dict[str, int] = {}
-            total: dict[str, int] = {}
+            aligned: Counter[str] = Counter()
+            total: Counter[str] = Counter()
             for key in mine:
                 parts = _segments(key.path)
                 if len(parts) <= depth or not _constant(parts[:depth]):
                     continue
                 prefix = "/" + "/".join(parts[:depth])
-                total[prefix] = total.get(prefix, 0) + 1
+                total[prefix] += 1
                 rest = parts[depth:]
                 if all(s in _PLACEHOLDERS for s in rest):
                     continue
                 if (key.method, "/" + "/".join(rest)) in targets:
-                    aligned[prefix] = aligned.get(prefix, 0) + 1
+                    aligned[prefix] += 1
             for prefix, count in aligned.items():
                 if count > floor and (best is None or count > best.aligned):
                     best = Realignment(view, other, prefix, count, total[prefix])
@@ -374,13 +366,13 @@ def missing_subtree(findings: list, index: Index, ruleset, floor: int) -> Missin
         there = [k.path for k in index.keys_in(absent_view) if k.http]
 
         for depth in range(1, MAX_PREFIX_SEGMENTS + 1):
-            groups: dict[str, int] = {}
+            groups: Counter[str] = Counter()
             for finding in mine:
                 parts = _segments(finding.key.path)
                 if len(parts) <= depth or not _constant(parts[:depth]):
                     continue
                 prefix = "/" + "/".join(parts[:depth])
-                groups[prefix] = groups.get(prefix, 0) + 1
+                groups[prefix] += 1
             for prefix, count in groups.items():
                 if count <= floor or (best is not None and count <= best.findings):
                     continue

@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from .views import read_yaml
 
 # Looked for beside the scanned source, then in the working directory, so a
 # project can carry its own suppressions in version control.
@@ -53,19 +53,11 @@ class IgnoreEntry:
 @dataclass
 class IgnoreList:
     entries: list[IgnoreEntry] = field(default_factory=list)
-    source: str = ""
 
     @classmethod
     def load(cls, path: str | Path) -> IgnoreList:
         source = Path(path)
-        try:
-            with source.open(encoding="utf-8") as handle:
-                data = yaml.safe_load(handle) or {}
-        except OSError as exc:
-            raise IgnoreError(f"cannot read {source}: {exc.strerror or exc}") from exc
-        except yaml.YAMLError as exc:
-            raise IgnoreError(f"{source} is not valid YAML: {exc}") from exc
-
+        data = read_yaml(source, IgnoreError) or {}
         if not isinstance(data, dict):
             raise IgnoreError(
                 f"{source} should be a mapping with an `ignore:` list, "
@@ -74,8 +66,7 @@ class IgnoreList:
         if not isinstance(listed, list):
             raise IgnoreError(f"`ignore:` in {source} should be a list, "
                               f"not {type(listed).__name__}")
-        return cls(entries=[_entry(item, source) for item in listed],
-                   source=str(source))
+        return cls(entries=[_entry(item, source) for item in listed])
 
     @classmethod
     def discover(cls, search_paths: list[str]) -> IgnoreList:
@@ -94,26 +85,16 @@ class IgnoreList:
         return cls(entries=[
             IgnoreEntry(path=_pattern(p, "--ignore"), why="given on the command line")
             for p in patterns
-        ], source="--ignore")
+        ])
 
     def extend(self, other: IgnoreList) -> IgnoreList:
-        return IgnoreList(entries=self.entries + other.entries,
-                          source=self.source or other.source)
-
-    def __len__(self) -> int:
-        return len(self.entries)
-
-    def matching(self, finding) -> IgnoreEntry | None:
-        for entry in self.entries:
-            if entry.covers(finding):
-                return entry
-        return None
+        return IgnoreList(entries=self.entries + other.entries)
 
     def apply(self, findings: list) -> tuple[list, list[tuple]]:
         """Split findings into what is reported and what was suppressed."""
         kept, dropped = [], []
         for finding in findings:
-            entry = self.matching(finding)
+            entry = next((e for e in self.entries if e.covers(finding)), None)
             if entry is None:
                 kept.append(finding)
             else:

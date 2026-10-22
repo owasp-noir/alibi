@@ -15,8 +15,7 @@ five different ways::
 The one rule that makes these comparable: **a path parameter's name is not
 part of its identity.** ``{petId}`` in a spec and ``<int:user_id>`` in Flask
 describe the same slot; only its position and how much of the path it swallows
-matter. Names are kept as evidence so a report can show why two rows matched,
-but they never reach the key.
+matter.
 
 Two placeholder tokens come out of this module:
 
@@ -149,21 +148,7 @@ class Normalized:
     key: Key
     original_url: str
     original_path: str
-    host: str | None = None
-    query: str | None = None
-    param_names: tuple[str, ...] = ()
-    spans_segments: bool = False
     non_http: bool = False
-
-    @property
-    def renamed(self) -> bool:
-        """True when normalization had to rewrite the path to reach the key.
-
-        Drives the match grade: two endpoints whose originals already agreed
-        matched exactly, while two that only agree after rewriting matched on
-        template shape alone.
-        """
-        return self.original_path != self.key.path
 
 
 def split_method(method: str) -> tuple[str, bool]:
@@ -174,59 +159,24 @@ def split_method(method: str) -> tuple[str, bool]:
     return m, m in NON_HTTP_METHODS
 
 
-def _canon_segment(seg: str, names: list[str]) -> tuple[str, bool]:
-    """Reduce one path segment to placeholders. Returns (text, spans_segments)."""
-    spans = False
+def _canon_segment(seg: str) -> str:
+    """Reduce one path segment to placeholders."""
 
     def take_angle(m: re.Match[str]) -> str:
-        nonlocal spans
         conv = (m.group("conv") or "").lower()
-        name = m.group("name")
-        if name:
-            names.append(name)
-        if conv in _SPANNING_CONVERTERS:
-            spans = True
-            return _WILD
-        return _PARAM
+        return _WILD if conv in _SPANNING_CONVERTERS else _PARAM
 
     def take_brace(m: re.Match[str]) -> str:
-        nonlocal spans
-        body = m.group("body")
-        if body.startswith("*"):
-            name = body.lstrip("*")
-            if name:
-                names.append(name)
-            spans = True
-            return _WILD
-        # {id:int} and {id?} both name the slot `id`.
-        name = body.split(":", 1)[0].rstrip("?")
-        if name:
-            names.append(name)
-        return _PARAM
-
-    def take_named_group(m: re.Match[str]) -> str:
-        names.append(m.group("name"))
-        return _PARAM
-
-    def take_colon(m: re.Match[str]) -> str:
-        names.append(m.group("name"))
-        return _PARAM
-
-    def take_splat(m: re.Match[str]) -> str:
-        nonlocal spans
-        name = m.group("name")
-        if name:
-            names.append(name)
-        spans = True
-        return _WILD
+        # {*rest} and {**rest} span; {id}, {id:int} and {id?} are one slot.
+        return _WILD if m.group("body").startswith("*") else _PARAM
 
     # Angle and brace forms are handled first: both can contain a `:` that the
     # colon rule would otherwise tear apart (`<int:id>`, `{id:int}`).
     text = _ANGLE.sub(take_angle, seg)
     text = _BRACE.sub(take_brace, text)
-    text = _NAMED_GROUP.sub(take_named_group, text)
-    text = _COLON.sub(take_colon, text)
-    text = _SPLAT.sub(take_splat, text)
+    text = _NAMED_GROUP.sub(_PARAM, text)
+    text = _COLON.sub(_PARAM, text)
+    text = _SPLAT.sub(_WILD, text)
 
     # A trailing `?` is punctuation either way -- an optional-parameter marker
     # (`{id}?`) or the empty query string on a captured URL (`/search?`) -- and
@@ -238,12 +188,11 @@ def _canon_segment(seg: str, names: list[str]) -> tuple[str, bool]:
     literal = text.replace(_PARAM, "").replace(_WILD, "")
     if literal:
         if literal in _BARE_WILDCARDS or seg in _BARE_WILDCARDS:
-            spans = True
-            return _WILD, spans
+            return _WILD
         if _REGEX_META.search(literal) and not _looks_like_filename(literal):
-            return _PARAM, spans
+            return _PARAM
 
-    return text, spans
+    return text
 
 
 def _looks_like_filename(literal: str) -> bool:
@@ -267,7 +216,7 @@ def _looks_like_filename(literal: str) -> bool:
     return False
 
 
-def _split_query(url: str) -> tuple[str, str | None]:
+def _split_query(url: str) -> str:
     """Peel a query string off a relative path.
 
     A `?` in a route is ambiguous: it opens a query string, but it also marks
@@ -280,23 +229,13 @@ def _split_query(url: str) -> tuple[str, str | None]:
     the marker from them and leave a stray `?` in the key.
     """
     head, sep, tail = url.partition("?")
-    if sep and "=" in tail:
-        return head, tail
-    return url, None
+    return head if sep and "=" in tail else url
 
 
 def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized:
     """Reduce a noir endpoint URL, method and protocol to a comparable key."""
     raw = (url or "").strip()
-    host: str | None = None
-
-    if "://" in raw:
-        parts = urlsplit(raw)
-        host = parts.netloc or None
-        path = parts.path or "/"
-        query = parts.query or None
-    else:
-        path, query = _split_query(raw)
+    path = urlsplit(raw).path if "://" in raw else _split_query(raw)
 
     if not path:
         path = "/"
@@ -309,12 +248,7 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     # A gRPC-gateway resource pattern holds a path inside a brace, so it has to
     # go before the split on `/` -- otherwise `{name=attachments/*}` arrives as
     # two segments, neither of them valid.
-    resource_names: list[str] = []
-
     def take_resource(match: re.Match[str]) -> str:
-        name = match.group("name").strip()
-        if name:
-            resource_names.append(name)
         # `*` inside the pattern stands for one segment and `**` for the rest,
         # matching the gRPC transcoding spec.
         expanded = match.group("pattern").strip()
@@ -327,19 +261,8 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     path = _OPTIONAL_GROUP.sub("", path)
 
     original_path = path
-    names: list[str] = list(resource_names)
-    spans = False
-    out: list[str] = []
-
-    for seg in path.split("/")[1:]:
-        if seg == "":
-            out.append("")
-            continue
-        canon, seg_spans = _canon_segment(seg, names)
-        spans = spans or seg_spans or _WILD in seg
-        out.append(canon)
-
-    canon_path = "/" + "/".join(out)
+    canon_path = "/" + "/".join(_canon_segment(seg) if seg else ""
+                                for seg in path.split("/")[1:])
     canon_path = canon_path.replace(_PARAM, "{}").replace(_WILD, "*")
 
     # A trailing slash never changes which handler runs, so it cannot be
@@ -357,9 +280,5 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
         key=Key(method=norm_method, path=canon_path, protocol=space),
         original_url=raw,
         original_path=original_path,
-        host=host,
-        query=query,
-        param_names=tuple(names),
-        spans_segments=spans,
         non_http=non_http,
     )

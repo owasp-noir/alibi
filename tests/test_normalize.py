@@ -39,20 +39,16 @@ def test_parameter_notations_reduce_to_one_token(url, expected):
     ],
 )
 def test_spanning_wildcards_are_distinct_from_single_segment_params(url, expected):
-    result = normalize(url)
-    assert result.key.path == expected
-    assert result.spans_segments is True
+    assert normalize(url).key.path == expected
 
 
-def test_parameter_names_are_evidence_not_identity():
+def test_parameter_names_are_not_identity():
     """The whole premise: a slot's name must not affect what it matches."""
     flask = normalize("/users/<int:user_id>", "GET")
     spec = normalize("/users/{userId}", "GET")
     rails = normalize("/users/:id", "GET")
 
     assert flask.key == spec.key == rails.key
-    assert flask.param_names == ("user_id",)
-    assert spec.param_names == ("userId",)
 
 
 def test_filenames_survive_the_regex_heuristic():
@@ -111,29 +107,17 @@ def test_absolute_urls_keep_the_host_out_of_the_key():
     relative = normalize("/v1/users", "POST")
 
     assert absolute.key == relative.key
-    assert absolute.host == "api.example.com"
-    assert relative.host is None
 
 
 def test_query_string_is_split_off_but_an_optional_param_is_not():
-    with_query = normalize("/search?q=1")
-    assert with_query.key.path == "/search"
-    assert with_query.query == "q=1"
-
-    optional = normalize("/posts/:id?")
-    assert optional.key.path == "/posts/{}"
-    assert optional.query is None
+    assert normalize("/search?q=1").key.path == "/search"
+    assert normalize("/posts/:id?").key.path == "/posts/{}"
 
 
 def test_methods_are_upper_cased_and_non_http_verbs_flagged():  # noqa
     assert normalize("/x", "get").key.method == "GET"
     assert normalize("/x", "SEND").non_http is True
     assert normalize("/x", "POST").non_http is False
-
-
-def test_renamed_reports_whether_rewriting_was_needed():
-    assert normalize("/users/{id}").renamed is True
-    assert normalize("/users/list").renamed is False
 
 
 def test_empty_url_does_not_explode():
@@ -214,9 +198,7 @@ def test_a_grpc_resource_pattern_expands_to_the_path_it_serves():
 
 
 def test_a_double_star_in_a_resource_pattern_spans_segments():
-    result = normalize("/v1/{name=shelves/*/books/**}")
-    assert result.key.path == "/v1/shelves/{}/books/*"
-    assert result.spans_segments is True
+    assert normalize("/v1/{name=shelves/*/books/**}").key.path == "/v1/shelves/{}/books/*"
 
 
 def test_an_expanded_pattern_meets_the_route_that_serves_it():
