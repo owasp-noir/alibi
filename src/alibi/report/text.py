@@ -52,8 +52,11 @@ def render(
     sources: list[str],
     errors: list = (),
     suppressed: list = (),
-    stream=sys.stdout,
+    stream=None,
 ) -> None:
+    # Looked up per call: a default of `sys.stdout` is the stream at import
+    # time, and printed into a closed one once stdout had been redirected.
+    stream = stream or sys.stdout
     paint = Painter(_use_color(stream))
     def out(line=""):
         print(line, file=stream)

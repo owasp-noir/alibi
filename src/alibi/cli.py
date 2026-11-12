@@ -229,7 +229,12 @@ def _scan(args) -> int:
     if args.snapshot:
         held_back = {item.rule_id for item in skipped}
         ran = [rule["id"] for rule in rules.rules if rule["id"] not in held_back]
-        snapshot.record(args.snapshot, index, findings, names, ran)
+        # Suppressed findings too. An `--ignore` added between two scans
+        # changes the report, not the repository, and recording only what
+        # survived it listed every newly suppressed finding as RESOLVED.
+        snapshot.record(args.snapshot, index,
+                        findings + [finding for finding, _ in suppressed],
+                        names, ran)
 
     if args.fail_on:
         threshold = rules.severities.index(args.fail_on)

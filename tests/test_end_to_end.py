@@ -110,6 +110,17 @@ def test_two_identical_scans_leave_nothing_for_the_history_to_report(
 
 
 @requires_noir
+def test_suppressing_a_finding_is_not_resolving_it(tmp_path, capsys):
+    database = tmp_path / "snapshots.db"
+    for extra in ([], ["--ignore", "^/reports"]):
+        assert cli.main(["scan", str(FIXTURE), "--snapshot", str(database),
+                         *extra]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["history", str(database)]) == cli.EXIT_OK
+    assert "RESOLVED" not in capsys.readouterr().out
+
+
+@requires_noir
 def test_the_view_map_covers_this_noir_build():
     """Fails when noir ships a specification analyzer alibi has not placed."""
     catalog = collect.list_techs(_noir())
