@@ -138,17 +138,16 @@ def _render_not_compared(history: History, paint, out) -> None:
     looks, to a naive difference, exactly like every shadow API having been
     closed. Those findings are held out of both lists and named here instead.
     """
-    if history.started:
+    if history.started or history.not_compared:
         out()
         out(paint("NOT COMPARED", "high"))
+    if history.started:
         out(paint("  These ran in this scan and not in the previous one, so "
                   "there is nothing to\n  compare their findings against -- "
                   "the scan report lists them.", "dim"))
         out(paint(f"  {', '.join(history.started)}", "dim"))
     if not history.not_compared:
         return
-    out()
-    out(paint("NOT COMPARED", "high"))
     out(paint("  These ran in the previous scan and not in this one, so their "
               "findings are\n  neither new nor resolved -- nobody looked. "
               "Check the sources you passed.", "dim"))

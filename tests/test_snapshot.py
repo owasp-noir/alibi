@@ -364,6 +364,7 @@ def test_a_rule_that_started_running_is_named_not_called_no_change(
     history_report.render(found, ["info", "low", "medium", "high", "critical"])
     out = capsys.readouterr().out
     assert "SHADOW" in out and "among the rules both scans ran" in out
+    assert out.count("NOT COMPARED") == 1
 
 
 def test_a_rule_running_in_both_scans_still_resolves_normally(

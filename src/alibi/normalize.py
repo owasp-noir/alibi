@@ -248,7 +248,9 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     # plain `/kong-literal$`; older noir left `^/admin/.*$` as written. Either
     # way the anchor is not a segment: read as regex, `/kong-literal$` keyed as
     # `/{}`, a prefix rule that "reached" every code endpoint in the tree.
-    path = path.removeprefix("^").removesuffix("$")
+    path = path.removeprefix("^")
+    if not path.endswith("\\$"):
+        path = path.removesuffix("$")
 
     if not path:
         path = "/"

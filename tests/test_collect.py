@@ -351,3 +351,14 @@ def test_a_missing_path_fails_before_any_scan(tmp_path, capsys):
     assert cli.main(["scan", str(tmp_path), str(tmp_path / "typo"),
                      "--noir-bin", str(tmp_path / "absent")]) == cli.EXIT_ERROR
     assert "no such path" in capsys.readouterr().err
+
+
+def test_a_dangling_passthrough_flag_cannot_take_the_config_path(tmp_path):
+    """After the passthrough, `--exclude-path` took the empty config as its
+    value and noir read the user's config after all."""
+    argv = tmp_path / "argv"
+    script = tmp_path / "fake-noir"
+    script.write_text(f'#!/bin/sh\necho "$@" > {argv}\necho \'{{"endpoints": []}}\'\n')
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    collect.scan(collect.Source(str(tmp_path)), str(script), ["--exclude-path"])
+    assert argv.read_text().split()[-1] == "--exclude-path"

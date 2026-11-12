@@ -256,3 +256,7 @@ def test_an_operation_fragment_is_a_literal_segment_of_its_own():
 def test_a_tilde_is_an_ordinary_path_character():
     assert normalize("/quotes/a-_.~").key.path == "/quotes/a-_.~"
     assert normalize("/~user/index.html").key.path == "/~user/index.html"
+
+
+def test_an_escaped_dollar_is_not_an_anchor():
+    assert normalize(r"/price\$").original_path == r"/price\$"

@@ -394,7 +394,6 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
     cmd = [noir_bin, "-b", source.path, "-f", "json", "-T"]
     if only_techs:
         cmd += ["--only-techs", ",".join(only_techs)]
-    cmd += extra_args or []
     try:
         # An empty config file in place of the user's. Noir reads
         # `~/.config/noir/config.yaml` on every scan, and a `techs:` or
@@ -404,8 +403,11 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
         with tempfile.TemporaryDirectory(prefix="alibi-") as home:
             config = Path(home) / "config.yaml"
             config.touch()
+            # Ahead of the passthrough: after it, a dangling `--exclude-path`
+            # took the config path as its value and the user's config was
+            # read after all.
             proc = subprocess.run(
-                cmd + ["--config-file", str(config)],
+                cmd + ["--config-file", str(config)] + (extra_args or []),
                 capture_output=True, text=True, timeout=timeout, check=False,
             )
     except subprocess.TimeoutExpired as exc:
