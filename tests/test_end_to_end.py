@@ -31,9 +31,15 @@ def test_a_real_scan_matches_across_the_notation_boundary():
     The fixture pairs three Flask routes with a three-path OpenAPI document.
     Two of each describe the same endpoint in different syntax and must cancel
     out; the leftovers are one undocumented route and one unbuilt contract.
+
+    Per view, as `alibi scan` does it. Noir 1.5 dedups `<int:user_id>` and
+    `{userId}` as one endpoint in a single combined scan, so the oas3 copies
+    vanished and both matched routes came back as SHADOW.
     """
-    result = collect.scan(collect.Source(str(FIXTURE)), _noir())
-    index = build(result.endpoints, ViewMap.load())
+    view_map = ViewMap.load()
+    result = collect.scan_views(collect.Source(str(FIXTURE)), _noir(),
+                                view_map.techs_by_view(collect.list_techs(_noir())))
+    index = build(result.endpoints, view_map)
     views = {v for entry in index.entries.values() for v in entry.views}
     findings, skipped = RuleSet.load().evaluate(index, views)
 
