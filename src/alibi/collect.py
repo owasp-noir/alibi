@@ -272,7 +272,15 @@ def sources(paths: list[str]) -> list[Source]:
     came back empty.
 
     A basename shared by more than one path falls back to the path as typed.
+
+    A path named twice (`app` and `app/`) is one source. Scanned twice, it
+    cost a second set of noir runs and printed two rows each claiming the
+    same endpoints.
     """
+    first: dict[Path, str] = {}
+    for path in paths:
+        first.setdefault(Path(path).resolve(), path)
+    paths = list(first.values())
     built = [Source(path=path) for path in paths]
     taken = Counter(source.name for source in built)
     for source, path in zip(built, paths, strict=True):

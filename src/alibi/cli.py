@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from . import collect, snapshot
 from .ignore import IgnoreError, IgnoreList
@@ -189,6 +190,12 @@ def _scan(args) -> int:
     ignores = (IgnoreList.load(args.ignore_file) if args.ignore_file
                else IgnoreList.discover(args.paths))
     ignores = ignores.extend(IgnoreList.from_patterns(args.ignore))
+
+    # Before any source is scanned: a typo in the last path otherwise cost
+    # the scans of every path before it, then failed.
+    missing = [path for path in args.paths if not Path(path).exists()]
+    if missing:
+        raise collect.NoirFailed(f"no such path: {', '.join(missing)}")
 
     noir_bin = collect.find_noir(args.noir_bin)
     collect.require_version(noir_bin)
