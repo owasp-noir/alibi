@@ -57,6 +57,18 @@ def test_a_real_scan_matches_across_the_notation_boundary():
 
 
 @requires_noir
+def test_the_users_noir_config_cannot_reach_into_a_view_scan(tmp_path, monkeypatch):
+    """Noir reads `$NOIR_HOME/config.yaml` on every scan, flags or not."""
+    (tmp_path / "config.yaml").write_text('exclude_techs: "oas3"\n')
+    monkeypatch.setenv("NOIR_HOME", str(tmp_path))
+    view_map = ViewMap.load()
+    result = collect.scan_views(collect.Source(str(FIXTURE)), _noir(),
+                                view_map.techs_by_view(collect.list_techs(_noir())))
+    views = {v for e in build(result.endpoints, view_map).entries.values() for v in e.views}
+    assert views == {"code", "doc"}
+
+
+@requires_noir
 def test_sarif_from_a_real_scan_validates(capsys):
     """Hand-built findings cannot produce the paths noir actually emits.
 
