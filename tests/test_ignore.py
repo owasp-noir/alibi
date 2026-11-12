@@ -156,3 +156,31 @@ def test_a_list_where_one_rule_belongs_is_refused(tmp_path):
     config.write_text("ignore:\n  - rule: [SHADOW, PHANTOM]\n")
     with pytest.raises(IgnoreError, match="names one rule, not list"):
         IgnoreList.load(config)
+
+
+def test_an_empty_ignore_pattern_is_refused_not_applied_to_everything():
+    with pytest.raises(IgnoreError, match="every path"):
+        IgnoreList.from_patterns([""])
+
+
+def test_every_source_s_suppressions_are_read(tmp_path):
+    for name, rule in (("a", "SHADOW"), ("b", "PHANTOM")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / ".alibi.yml").write_text(f"ignore:\n  - rule: {rule}\n")
+    found = IgnoreList.discover([str(tmp_path / "a"), str(tmp_path / "b")])
+    assert [e.rule for e in found.entries] == ["SHADOW", "PHANTOM"]
+
+
+@pytest.mark.parametrize("text", ["ignore:\n  - rule: SHADOW\n    why: 123\n",
+                                  "ignore:\n  - rule: SHADOW\n    why: [a, b]\n"])
+def test_a_reason_must_be_text(tmp_path, text):
+    (tmp_path / ".alibi.yml").write_text(text)
+    with pytest.raises(IgnoreError, match="should be text"):
+        IgnoreList.load(tmp_path / ".alibi.yml")
+
+
+def test_an_ignore_file_that_is_not_utf8_is_reported(tmp_path):
+    text = "ignore:\n  - rule: SHADOW\n    why: caf\xe9\n"
+    (tmp_path / ".alibi.yml").write_bytes(text.encode("latin-1"))
+    with pytest.raises(IgnoreError, match="not valid YAML"):
+        IgnoreList.load(tmp_path / ".alibi.yml")

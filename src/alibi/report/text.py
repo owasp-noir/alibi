@@ -156,6 +156,8 @@ def render(
             out("  " + paint("No rule had the views it needs. See below.", "dim"))
         else:
             out("  " + paint("No disagreement between the views in this scan.", "info"))
+        # "See below" has to have something below it.
+        _render_suppressed(suppressed, paint, out)
         _render_skipped(skipped, paint, out)
         out()
         return
