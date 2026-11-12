@@ -251,3 +251,8 @@ def test_an_operation_fragment_is_a_literal_segment_of_its_own():
     assert normalize("https://api.test/graphql#Mutation.x").key.path == "/graphql/#Mutation.x"
     # A hash route is the client's; the server answers on the path.
     assert normalize("/app/#/dashboard").key.path == "/app"
+
+
+def test_a_tilde_is_an_ordinary_path_character():
+    assert normalize("/quotes/a-_.~").key.path == "/quotes/a-_.~"
+    assert normalize("/~user/index.html").key.path == "/~user/index.html"

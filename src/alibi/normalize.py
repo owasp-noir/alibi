@@ -212,7 +212,8 @@ def _looks_like_filename(literal: str) -> bool:
     findings, which is the direction that cannot be checked from the report.
     """
     if _REGEX_META.sub("", literal) == literal.replace(".", ""):
-        return bool(re.fullmatch(r"\.?[\w%-]+(\.[\w%-]+)*\.?", literal))
+        # `~` is unreserved (RFC 3986 2.3), as ordinary in a path as `-`.
+        return bool(re.fullmatch(r"\.?[\w%~-]+(\.[\w%~-]+)*\.?", literal))
     return False
 
 
