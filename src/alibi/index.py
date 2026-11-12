@@ -167,7 +167,14 @@ class Index:
         return dict(counts)
 
     def keys_in(self, view: str) -> list[Key]:
-        return [e.key for e in self.entries.values() if view in e.views]
+        """The web surface of a view -- the only keys a routing rule can reach.
+
+        Every caller wants exactly this. Two did not filter, and a gateway
+        `location /agent/` "reached" the CLI command `cli://tool/agent`: no
+        DANGLING, while the coverage line beside it said 0 of 1 reached.
+        """
+        return [e.key for e in self.entries.values()
+                if view in e.views and e.key.http]
 
     def key_set(self, view: str) -> KeySet:
         """The keys of a view, indexed for "does this rule reach any of them".
@@ -275,7 +282,7 @@ class Index:
         return self._coverage_stats[target]
 
     def _compute_coverage_stats(self, target: str) -> dict[str, tuple[int, int, int]]:
-        targets = [key for key in self.keys_in(target) if key.http]
+        targets = self.keys_in(target)
         if not targets:
             # "0 of 0" answers nothing. With no web surface to reach, how much
             # of it a gateway reaches is not a number worth printing.

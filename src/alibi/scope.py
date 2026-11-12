@@ -109,7 +109,7 @@ def suggest(index: Index, findings: list, ruleset=None,
                       if view in rule.get("needs", [])}
         findings = [f for f in findings if f.rule_id in about_view]
 
-    paths = [key.path for key in index.keys_in(view) if key.http]
+    paths = [key.path for key in index.keys_in(view)]
     dominant = _dominant_prefix(paths)
     if dominant is None:
         return None
@@ -294,8 +294,8 @@ def realign(index: Index, left: str, right: str, floor: int) -> Realignment | No
     """
     best: Realignment | None = None
     for view, other in ((left, right), (right, left)):
-        targets = {(k.method, k.path) for k in index.keys_in(other) if k.http}
-        mine = [k for k in index.keys_in(view) if k.http]
+        targets = {(k.method, k.path) for k in index.keys_in(other)}
+        mine = index.keys_in(view)
         for depth in range(1, MAX_PREFIX_SEGMENTS + 1):
             aligned: Counter[str] = Counter()
             total: Counter[str] = Counter()
@@ -363,7 +363,7 @@ def missing_subtree(findings: list, index: Index, ruleset, floor: int) -> Missin
             continue
         if inside:
             mine = [f for f in mine if f.key.path.startswith(inside)]
-        there = [k.path for k in index.keys_in(absent_view) if k.http]
+        there = [k.path for k in index.keys_in(absent_view)]
 
         for depth in range(1, MAX_PREFIX_SEGMENTS + 1):
             groups: Counter[str] = Counter()
