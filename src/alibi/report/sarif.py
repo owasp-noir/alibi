@@ -82,6 +82,7 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
           suppressed: list = ()) -> dict:
     rules = [_rule(rule) for rule in ruleset.rules]
     position = {rule["id"]: i for i, rule in enumerate(rules)}
+    root = _single_root(findings + [f for f, _ in suppressed])
 
     driver = {
         "name": "alibi",
@@ -118,9 +119,9 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                 # them as dismissed with the project's own reason attached,
                 # which is the same promise the terminal report makes: say what
                 # was withheld, never withhold it silently.
-                **_uri_bases(findings),
-                "results": [_result(f, position) for f in findings]
-                + [_result(f, position, entry) for f, entry in suppressed],
+                **_uri_bases(root),
+                "results": [_result(f, position, root=root) for f in findings]
+                + [_result(f, position, entry, root) for f, entry in suppressed],
                 # A findings list with no denominator is what this tool exists
                 # to avoid: 147 findings mean something different beside 230
                 # corroborated endpoints than beside none. A SARIF file is
@@ -139,26 +140,35 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
     }
 
 
-def _uri_bases(findings: list[Finding]) -> dict:
-    """Declare what %SRCROOT% is, when the scan had exactly one root.
+def _single_root(findings: list[Finding]) -> str | None:
+    """The one directory every reported file hangs off, if there is one.
 
     With several sources there is no single checkout for the paths to hang
     off, and pointing the base id at one of them would be wrong for the rest.
-    Code scanning matches on the relative path regardless; the declaration is
-    for consumers that resolve the reference.
+    A file source has no root of its own (an empty one), so it rules a single
+    root out too. Without one, every path is relative to the working
+    directory -- the checkout in CI. Relative to each its own root instead,
+    `alibi scan $PWD/A $PWD/B` wrote `app.rb` where `alibi scan A B` wrote
+    `A/app.rb`, and two roots' same-named files collided.
     """
     roots = {
-        code_path.get("source_root")
+        code_path.get("source_root") or ""
         for finding in findings
         for code_path in finding.entry.code_paths()
-        if code_path.get("source_root")
+        if code_path.get("path")
     }
     if len(roots) != 1:
+        return None
+    root = roots.pop()
+    return root if root and Path(root).is_absolute() else None
+
+
+def _uri_bases(root: str | None) -> dict:
+    """Declare what %SRCROOT% is. Code scanning matches on the relative path
+    regardless; the declaration is for consumers that resolve the reference."""
+    if root is None:
         return {}
-    root = Path(roots.pop())
-    if not root.is_absolute():
-        return {}
-    return {"originalUriBaseIds": {SRCROOT: {"uri": root.as_uri() + "/"}}}
+    return {"originalUriBaseIds": {SRCROOT: {"uri": Path(root).as_uri() + "/"}}}
 
 
 def _error_notification(error) -> dict:
@@ -218,9 +228,9 @@ def _notification(item: Skipped) -> dict:
 
 
 def _result(finding: Finding, position: dict[str, int],
-            suppression=None) -> dict:
+            suppression=None, root: str | None = None) -> dict:
     entry = finding.entry
-    locations = _locations(finding)
+    locations = _locations(finding, root)
 
     result = {
         "ruleId": finding.rule_id,
@@ -268,7 +278,7 @@ def _result(finding: Finding, position: dict[str, int],
     return result
 
 
-def _locations(finding: Finding) -> list[dict]:
+def _locations(finding: Finding, root: str | None = None) -> list[dict]:
     physical: list[dict] = []
     seen: set[tuple[str, int | None]] = set()
 
@@ -281,7 +291,7 @@ def _locations(finding: Finding) -> list[dict]:
         # specification analyzers -- they point at a document rather than at a
         # statement in it. A region with no line would be a claim about where.
         start = line if isinstance(line, int) and line > 0 else None
-        uri = _uri(str(path), code_path.get("source_root") or "")
+        uri = _uri(str(path), root or "")
         if (uri, start) in seen:
             continue
         seen.add((uri, start))
