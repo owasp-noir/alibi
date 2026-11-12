@@ -547,3 +547,11 @@ def test_a_version_marker_that_is_not_a_number_is_refused(db, record, endpoint):
 
     with pytest.raises(snapshot.SnapshotError, match="schema version abc"):
         snapshot.history(db)
+
+
+def test_history_of_an_empty_file_leaves_it_empty(tmp_path):
+    empty = tmp_path / "zero.db"
+    empty.touch()
+    with pytest.raises(snapshot.SnapshotError, match="no scans"):
+        snapshot.history(empty)
+    assert empty.stat().st_size == 0

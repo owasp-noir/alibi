@@ -415,6 +415,10 @@ def _existing(db_path: Path | str) -> Path:
             f"no snapshot database at {path}. Record one with "
             f"`alibi scan <source> --snapshot {path}`."
         )
+    # Before `_open`, which lays the schema down: `alibi history` on a 0-byte
+    # file wrote 49 KB into it, and a read should not change what it reads.
+    if path.is_file() and path.stat().st_size == 0:
+        raise SnapshotError(f"{path} holds no scans yet.")
     return path
 
 
