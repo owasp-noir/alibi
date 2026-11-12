@@ -10,7 +10,7 @@ def test_every_non_language_tech_is_placed_by_hand():
     disappears from the comparison.
     """
     view_map = ViewMap.load()
-    assert len(view_map.mapped_techs) == 49
+    assert len(view_map.mapped_techs) == 60
 
 
 def test_language_analyzers_fall_through_to_code():

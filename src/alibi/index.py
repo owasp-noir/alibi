@@ -20,7 +20,7 @@ from pathlib import PurePosixPath
 
 from .collect import RawEndpoint
 from .cover import Coverage, KeySet
-from .normalize import Key, Normalized, normalize
+from .normalize import WILDCARD_METHOD, Key, Normalized, normalize
 from .views import TechView, ViewMap
 
 # Match grades, reported alongside every finding.
@@ -167,7 +167,14 @@ class Index:
         return dict(counts)
 
     def keys_in(self, view: str) -> list[Key]:
-        return [e.key for e in self.entries.values() if view in e.views]
+        """The web surface of a view -- the only keys a routing rule can reach.
+
+        Every caller wants exactly this. Two did not filter, and a gateway
+        `location /agent/` "reached" the CLI command `cli://tool/agent`: no
+        DANGLING, while the coverage line beside it said 0 of 1 reached.
+        """
+        return [e.key for e in self.entries.values()
+                if view in e.views and e.key.http]
 
     def key_set(self, view: str) -> KeySet:
         """The keys of a view, indexed for "does this rule reach any of them".
@@ -275,7 +282,7 @@ class Index:
         return self._coverage_stats[target]
 
     def _compute_coverage_stats(self, target: str) -> dict[str, tuple[int, int, int]]:
-        targets = [key for key in self.keys_in(target) if key.http]
+        targets = self.keys_in(target)
         if not targets:
             # "0 of 0" answers nothing. With no web surface to reach, how much
             # of it a gateway reaches is not a number worth printing.
@@ -315,12 +322,51 @@ def build(raw_endpoints: list[RawEndpoint], view_map: ViewMap) -> Index:
             Observation(normalized=normalized, raw=raw, view=tech.view, tech=tech)
         )
 
+    _spread_any_verb(index, view_map)
+
     for view in view_map.views:
         if view_map.is_predicate(view):
             index.coverages[view] = Coverage.from_entries(index.entries.values(), view)
 
     _find_near_misses(index)
     return index
+
+
+def _spread_any_verb(index: Index, view_map: ViewMap) -> None:
+    """A route on every verb is each verb another view names on that path.
+
+    Spring's `@RequestMapping("/users")` with no method, Phoenix's `match :*`
+    and ASP.NET's unconstrained actions come out of noir as `ANY`. Keyed by
+    method, `ANY /users` in the code and `GET`, `POST /users` in the contract
+    were three endpoints: a SHADOW and two PHANTOMs for one route the
+    contract describes exactly. So the sighting joins every concrete verb a
+    different endpoint view has on the same path, and stands alone only if
+    there is none.
+
+    Routing views keep their `ANY`: a gateway rule is coverage, and coverage
+    already reads `ANY` as every verb.
+    """
+    by_path: dict[tuple[str, str], list[Entry]] = defaultdict(list)
+    for entry in index.entries.values():
+        by_path[(entry.key.protocol, entry.key.path)].append(entry)
+
+    for key, entry in list(index.entries.items()):
+        if key.method != WILDCARD_METHOD:
+            continue
+        spread = [o for o in entry.observations if not view_map.is_predicate(o.view)]
+        mine = {o.view for o in spread}
+        targets = [
+            other for other in by_path[(key.protocol, key.path)]
+            if other is not entry
+            and {v for v in other.views if not view_map.is_predicate(v)} - mine
+        ]
+        if not spread or not targets:
+            continue
+        for other in targets:
+            other.observations.extend(spread)
+        entry.observations = [o for o in entry.observations if o not in spread]
+        if not entry.observations:
+            del index.entries[key]
 
 
 # How many *distinct paths* have to sit beneath a path before it is read as a

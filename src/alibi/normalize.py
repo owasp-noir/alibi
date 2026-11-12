@@ -212,7 +212,8 @@ def _looks_like_filename(literal: str) -> bool:
     findings, which is the direction that cannot be checked from the report.
     """
     if _REGEX_META.sub("", literal) == literal.replace(".", ""):
-        return bool(re.fullmatch(r"\.?[\w%-]+(\.[\w%-]+)*\.?", literal))
+        # `~` is unreserved (RFC 3986 2.3), as ordinary in a path as `-`.
+        return bool(re.fullmatch(r"\.?[\w%~-]+(\.[\w%~-]+)*\.?", literal))
     return False
 
 
@@ -235,7 +236,21 @@ def _split_query(url: str) -> str:
 def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized:
     """Reduce a noir endpoint URL, method and protocol to a comparable key."""
     raw = (url or "").strip()
-    path = urlsplit(raw).path if "://" in raw else _split_query(raw)
+    if "://" in raw:
+        parts = urlsplit(raw)
+        path, fragment = parts.path, parts.fragment
+    else:
+        path, _, fragment = raw.partition("#")
+        path = _split_query(path)
+
+    # Regex anchors at the edges of the whole path. Noir 1.5 strips them from
+    # routes it knows are regexes, so one that survives is a literal -- Kong's
+    # plain `/kong-literal$`; older noir left `^/admin/.*$` as written. Either
+    # way the anchor is not a segment: read as regex, `/kong-literal$` keyed as
+    # `/{}`, a prefix rule that "reached" every code endpoint in the tree.
+    path = path.removeprefix("^")
+    if not path.endswith("\\$"):
+        path = path.removesuffix("$")
 
     if not path:
         path = "/"
@@ -271,6 +286,17 @@ def normalize(url: str, method: str = "GET", protocol: str = HTTP) -> Normalized
     # coverage evaluator, which reads `original_path`, not the key.
     if len(canon_path) > 1 and canon_path.endswith("/"):
         canon_path = canon_path.rstrip("/")
+
+    # Noir names an operation multiplexed onto one transport path with a
+    # fragment: `/graphql#Query.me`, `/rpc#getUser`. Read as part of the path,
+    # `#` and `.` looked like regex and every operation keyed as one `/{}` --
+    # and Graphene's `/graphql/#Query.me` never met the SDL's
+    # `/graphql#Query.me`. Kept literal, as a segment of its own, so a gateway
+    # prefix on the transport still reaches it. A fragment holding a path is
+    # a client-side hash route, which no server sees.
+    if fragment and "/" not in fragment:
+        canon_path = canon_path.rstrip("/") + "/#" + fragment
+        original_path += "#" + fragment
 
     norm_method, odd_verb = split_method(method)
     space = HTTP if (protocol or "").lower() in HTTP_PROTOCOLS else protocol.lower()

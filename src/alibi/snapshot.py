@@ -147,6 +147,9 @@ class History:
     # Rules that ran in the earlier scan and not in this one. Their findings
     # are neither new nor resolved -- they were not looked for.
     not_compared: list[str] = dataclass_field(default_factory=list)
+    # The mirror: rules this scan ran and the previous one did not. Their
+    # findings are held out of `new` for the same reason.
+    started: list[str] = dataclass_field(default_factory=list)
     # Scan ordinals. Two scans a second apart carry the same timestamp, and a
     # header reading "07:00:55Z compared against 07:00:55Z" cannot say which is
     # which -- which is every run in CI, and every run while iterating.
@@ -261,6 +264,7 @@ def history(db_path: Path | str) -> History:
         known = now_ran is not None and then_ran is not None
         comparable = (now_ran & then_ran) if known else None
         stopped = sorted(then_ran - now_ran) if known else []
+        started = sorted(now_ran - then_ran) if known else []
 
         return History(
             path=path,
@@ -272,6 +276,7 @@ def history(db_path: Path | str) -> History:
             new=_difference(conn, current_id, previous_id, comparable),
             resolved=_difference(conn, previous_id, current_id, comparable),
             not_compared=stopped,
+            started=started,
             sources_then=then if moved else [],
             sources_now=now if moved else [],
         )
@@ -410,6 +415,10 @@ def _existing(db_path: Path | str) -> Path:
             f"no snapshot database at {path}. Record one with "
             f"`alibi scan <source> --snapshot {path}`."
         )
+    # Before `_open`, which lays the schema down: `alibi history` on a 0-byte
+    # file wrote 49 KB into it, and a read should not change what it reads.
+    if path.is_file() and path.stat().st_size == 0:
+        raise SnapshotError(f"{path} holds no scans yet.")
     return path
 
 

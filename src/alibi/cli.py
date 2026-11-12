@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from . import collect, snapshot
 from .ignore import IgnoreError, IgnoreList
@@ -190,6 +191,12 @@ def _scan(args) -> int:
                else IgnoreList.discover(args.paths))
     ignores = ignores.extend(IgnoreList.from_patterns(args.ignore))
 
+    # Before any source is scanned: a typo in the last path otherwise cost
+    # the scans of every path before it, then failed.
+    missing = [path for path in args.paths if not Path(path).exists()]
+    if missing:
+        raise collect.NoirFailed(f"no such path: {', '.join(missing)}")
+
     noir_bin = collect.find_noir(args.noir_bin)
     collect.require_version(noir_bin)
 
@@ -229,7 +236,12 @@ def _scan(args) -> int:
     if args.snapshot:
         held_back = {item.rule_id for item in skipped}
         ran = [rule["id"] for rule in rules.rules if rule["id"] not in held_back]
-        snapshot.record(args.snapshot, index, findings, names, ran)
+        # Suppressed findings too. An `--ignore` added between two scans
+        # changes the report, not the repository, and recording only what
+        # survived it listed every newly suppressed finding as RESOLVED.
+        snapshot.record(args.snapshot, index,
+                        findings + [finding for finding, _ in suppressed],
+                        names, ran)
 
     if args.fail_on:
         threshold = rules.severities.index(args.fail_on)

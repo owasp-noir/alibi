@@ -345,6 +345,28 @@ def test_a_rule_that_stopped_running_is_not_a_pile_of_resolved_findings(
     assert "SHADOW" in history.not_compared
 
 
+def test_a_rule_that_started_running_is_named_not_called_no_change(
+    tmp_path, endpoint, view_map, capsys
+):
+    """The mirror of the trap above: the contracts were added this time."""
+    from alibi.report import history as history_report
+
+    db = tmp_path / "snapshots.db"
+    code = [endpoint("/undocumented", "GET", "python_flask")]
+    snapshot.record(db, *_evaluate(code, view_map)[:2], ["all"],
+                    _evaluate(code, view_map)[2])
+    full = code + [endpoint("/kept", "GET", "oas3")]
+    index, findings, ran = _evaluate(full, view_map)
+    snapshot.record(db, index, findings, ["all"], ran)
+
+    found = snapshot.history(db)
+    assert found.new == [] and "SHADOW" in found.started
+    history_report.render(found, ["info", "low", "medium", "high", "critical"])
+    out = capsys.readouterr().out
+    assert "SHADOW" in out and "among the rules both scans ran" in out
+    assert out.count("NOT COMPARED") == 1
+
+
 def test_a_rule_running_in_both_scans_still_resolves_normally(
     tmp_path, endpoint, view_map
 ):
@@ -526,3 +548,11 @@ def test_a_version_marker_that_is_not_a_number_is_refused(db, record, endpoint):
 
     with pytest.raises(snapshot.SnapshotError, match="schema version abc"):
         snapshot.history(db)
+
+
+def test_history_of_an_empty_file_leaves_it_empty(tmp_path):
+    empty = tmp_path / "zero.db"
+    empty.touch()
+    with pytest.raises(snapshot.SnapshotError, match="no scans"):
+        snapshot.history(empty)
+    assert empty.stat().st_size == 0

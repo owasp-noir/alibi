@@ -52,8 +52,11 @@ def render(
     sources: list[str],
     errors: list = (),
     suppressed: list = (),
-    stream=sys.stdout,
+    stream=None,
 ) -> None:
+    # Looked up per call: a default of `sys.stdout` is the stream at import
+    # time, and printed into a closed one once stdout had been redirected.
+    stream = stream or sys.stdout
     paint = Painter(_use_color(stream))
     def out(line=""):
         print(line, file=stream)
@@ -153,6 +156,8 @@ def render(
             out("  " + paint("No rule had the views it needs. See below.", "dim"))
         else:
             out("  " + paint("No disagreement between the views in this scan.", "info"))
+        # "See below" has to have something below it.
+        _render_suppressed(suppressed, paint, out)
         _render_skipped(skipped, paint, out)
         out()
         return

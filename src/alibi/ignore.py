@@ -70,18 +70,34 @@ class IgnoreList:
 
     @classmethod
     def discover(cls, search_paths: list[str]) -> IgnoreList:
-        """Find a project's own suppressions without being told where."""
-        candidates = [Path(p) for p in search_paths] + [Path.cwd()]
-        for base in candidates:
+        """Find a project's own suppressions without being told where.
+
+        One file per source, not the first one found: `alibi scan A B` with a
+        list beside each read only A's, and B's suppressions were printed as
+        findings. The working directory's is the fallback when no source
+        carries one.
+        """
+        found: dict[Path, None] = {}
+        for base in [Path(p) for p in search_paths]:
             directory = base if base.is_dir() else base.parent
-            for name in CONFIG_NAMES:
-                found = directory / name
-                if found.is_file():
-                    return cls.load(found)
-        return cls()
+            first = _config_in(directory)
+            if first:
+                found[first.resolve()] = None
+        if not found and (here := _config_in(Path.cwd())):
+            found[here.resolve()] = None
+        merged = cls()
+        for path in found:
+            merged = merged.extend(cls.load(path))
+        return merged
 
     @classmethod
     def from_patterns(cls, patterns: list[str]) -> IgnoreList:
+        # An empty pattern matches every path. `--ignore "$UNSET"` in CI
+        # suppressed the whole scan and `--fail-on` passed; the ignore file
+        # already refuses `path: ""` for the same reason.
+        if any(not p for p in patterns):
+            raise IgnoreError("--ignore \"\" matches every path and would "
+                              "suppress the whole scan")
         return cls(entries=[
             IgnoreEntry(path=_pattern(p, "--ignore"), why="given on the command line")
             for p in patterns
@@ -129,12 +145,17 @@ def _entry(item, source) -> IgnoreEntry:
             raise IgnoreError(f"`{key}:` under `ignore:` in {source} names one "
                               f"{key}, not {type(item[key]).__name__} -- write "
                               f"one entry per {key}")
+    # SARIF requires the justification be a string; `why: 123` failed the
+    # schema on every suppressed result.
+    if item.get("why") is not None and not isinstance(item["why"], str):
+        raise IgnoreError(f"`why:` under `ignore:` in {source} should be text, "
+                          f"not {type(item['why']).__name__}")
     pattern = item.get("path")
     return IgnoreEntry(
         path=_pattern(pattern, source) if pattern else None,
         rule=item.get("rule"),
         view=item.get("view"),
-        why=item.get("why", ""),
+        why=item.get("why") or "",
     )
 
 
@@ -144,3 +165,8 @@ def _pattern(pattern, source) -> re.Pattern[str]:
     except (re.error, TypeError) as exc:
         raise IgnoreError(f"{pattern!r} in {source} is not a valid regular "
                           f"expression: {exc}") from exc
+
+
+def _config_in(directory: Path) -> Path | None:
+    return next((directory / name for name in CONFIG_NAMES
+                 if (directory / name).is_file()), None)

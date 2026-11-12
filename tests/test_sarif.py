@@ -437,8 +437,14 @@ def test_a_path_outside_every_root_is_named_absolutely(view_map):
     assert "file:///elsewhere/vendor/lib.go" in uris
 
 
-def test_several_roots_leave_the_base_undeclared(view_map):
-    """Pointing one base id at one of them would be wrong for the rest."""
+def test_several_roots_leave_the_base_undeclared(view_map, monkeypatch):
+    """Pointing one base id at one of them would be wrong for the rest.
+
+    So every path hangs off the working directory, as it does when the same
+    sources are typed relative. Each relative to its own root, two roots'
+    same-named files were one URI.
+    """
+    monkeypatch.chdir("/")
     endpoints = [
         _with_root(None, "/api/thing", "GET", "go_http",
                    "/a/routers/router.go", "/a", line=1),
@@ -456,8 +462,8 @@ def test_several_roots_leave_the_base_undeclared(view_map):
         for location in result.get("locations", [])
         if "physicalLocation" in location
     ]
-    assert "routers/router.go" in uris
-    assert "handlers/h.go" in uris
+    assert "a/routers/router.go" in uris
+    assert "b/handlers/h.go" in uris
 
 
 def test_a_mount_is_doubted_as_a_mount_not_as_a_missing_counterpart(endpoint, view_map):

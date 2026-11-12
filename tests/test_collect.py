@@ -336,3 +336,29 @@ def test_json_that_is_not_an_endpoint_document_is_an_error(tmp_path):
     noir = fake_noir(tmp_path, [])
     with pytest.raises(collect.NoirFailed, match="not an endpoint document"):
         collect.scan(collect.Source(path=str(tmp_path)), noir)
+
+
+def test_a_path_named_twice_is_one_source():
+    from alibi.collect import sources
+
+    assert [s.path for s in sources(["a", "b", "a/", "./b", "c"])] == ["a", "b", "c"]
+
+
+def test_a_missing_path_fails_before_any_scan(tmp_path, capsys):
+    from alibi import cli
+
+    # A noir that is never reached: the path check comes first.
+    assert cli.main(["scan", str(tmp_path), str(tmp_path / "typo"),
+                     "--noir-bin", str(tmp_path / "absent")]) == cli.EXIT_ERROR
+    assert "no such path" in capsys.readouterr().err
+
+
+def test_a_dangling_passthrough_flag_cannot_take_the_config_path(tmp_path):
+    """After the passthrough, `--exclude-path` took the empty config as its
+    value and noir read the user's config after all."""
+    argv = tmp_path / "argv"
+    script = tmp_path / "fake-noir"
+    script.write_text(f'#!/bin/sh\necho "$@" > {argv}\necho \'{{"endpoints": []}}\'\n')
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    collect.scan(collect.Source(str(tmp_path)), str(script), ["--exclude-path"])
+    assert argv.read_text().split()[-1] == "--exclude-path"

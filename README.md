@@ -18,9 +18,9 @@ Noir already reads five independent views of the same surface:
 | View | Read from |
 | --- | --- |
 | **code** | 200-plus analyzers across 33 languages |
-| **doc** | OpenAPI, RAML, WSDL, GraphQL SDL, AsyncAPI, gRPC, Smithy, TypeSpec, OData, OpenRPC |
-| **traffic** | HAR, mitmproxy, Burp, Caido, ZAP, Postman, Insomnia, Bruno, `.http` |
-| **gateway** | nginx, Apache, Envoy, Kong, Traefik, APISIX, Caddy, Istio, Kubernetes Ingress and Gateway API |
+| **doc** | OpenAPI, RAML, WSDL, GraphQL SDL, AsyncAPI, Smithy, TypeSpec, OData, OpenRPC, Thrift |
+| **traffic** | HAR, mitmproxy, Burp, Caido, ZAP, Postman, Insomnia, Bruno, Hoppscotch, Thunder Client, Hurl, `.http` |
+| **gateway** | nginx, Apache, HAProxy, Envoy, Kong, Traefik, APISIX, Caddy, Istio, Kubernetes Ingress and Gateway API, KrakenD, Tyk, Apigee, Ocelot, YARP, Spring Cloud Gateway |
 | **infra** | Terraform, CloudFormation, CDK, Serverless, Vercel, Netlify, Wrangler, Azure Functions, Kamal |
 
 What it does not do is compare them. That is the whole job here, and it needs no
@@ -95,8 +95,10 @@ informative part, and `-f json` has all of it.
 Flags for noir go after a bare `--` or through `--noir-arg`. Filters such as
 `--exclude-path` are fine; flags that would replace the JSON contract or
 collapse alibi's per-view scans (`--format`, `--diff-*`, `--only-techs`,
-`-t` / `--techs`, `-b`, …)
-are refused with exit status 2.
+`-t` / `--techs`, `-b`, `--config-file`, …)
+are refused with exit status 2. Your `~/.config/noir/config.yaml` is not read
+during a scan, for the same reason: its `techs` and `exclude_techs` keys do
+what those flags do.
 
 ### In CI
 

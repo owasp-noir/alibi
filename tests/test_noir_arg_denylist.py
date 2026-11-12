@@ -28,6 +28,8 @@ from alibi.cli import EXIT_ERROR, main
         ["--techs=python_fastapi"],
         ["-b", "../other"],
         ["--base-path=../other"],
+        ["--config-file", "noir.yml"],
+        ["--config-file=noir.yml"],
     ],
 )
 def test_each_dangerous_class_is_refused(extra):

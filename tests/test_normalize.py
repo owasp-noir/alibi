@@ -225,3 +225,38 @@ def test_an_express_5_optional_group_leaves_the_path_it_certainly_serves():
 
     # And the other brace form that holds a path is untouched by this.
     assert normalize("/api/v1/{name=memos/*}").key.path == "/api/v1/memos/{}"
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        # Noir 1.5 keeps a `$` on a route it does not read as a regex.
+        ("/kong-literal$", "/kong-literal"),
+        # Older noir left the anchors on regex routes.
+        ("^/admin/.*$", "/admin/*"),
+        ("^/kong/[0-9]+$", "/kong/{}"),
+    ],
+)
+def test_regex_anchors_are_not_a_parameter(url, expected):
+    assert normalize(url).key.path == expected
+
+
+def test_an_operation_fragment_is_a_literal_segment_of_its_own():
+    """Graphene writes `/graphql/#Query.me`, the SDL `/graphql#Query.me`."""
+    code = normalize("/graphql/#Query.me", "POST").key
+    sdl = normalize("/graphql#Query.me", "POST").key
+    assert code == sdl == Key("POST", "/graphql/#Query.me")
+    assert normalize("/graphql#Query.user", "POST").key != sdl
+    assert normalize("/rpc#getUser", "POST").key.path == "/rpc/#getUser"
+    assert normalize("https://api.test/graphql#Mutation.x").key.path == "/graphql/#Mutation.x"
+    # A hash route is the client's; the server answers on the path.
+    assert normalize("/app/#/dashboard").key.path == "/app"
+
+
+def test_a_tilde_is_an_ordinary_path_character():
+    assert normalize("/quotes/a-_.~").key.path == "/quotes/a-_.~"
+    assert normalize("/~user/index.html").key.path == "/~user/index.html"
+
+
+def test_an_escaped_dollar_is_not_an_anchor():
+    assert normalize(r"/price\$").original_path == r"/price\$"

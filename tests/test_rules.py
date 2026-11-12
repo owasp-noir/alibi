@@ -295,6 +295,29 @@ def test_a_gateway_rule_reaching_nothing_is_dangling(endpoint, view_map):
     assert dangling == {"/removed-service"}
 
 
+def test_a_gateway_rule_reaching_only_a_cli_command_is_dangling(endpoint, view_map):
+    cli = endpoint("/agent/run", "GET", "python_flask")
+    cli.protocol = "cli"
+    endpoints = [endpoint("/agent", "ANY", "nginx"), cli]
+    endpoints += [endpoint(f"/api/thing{i}", "GET", "python_flask") for i in range(4)]
+
+    findings, _ = evaluate(endpoints, view_map)
+    assert {f.key.path for f in findings if f.rule_id == "DANGLING"} == {"/agent"}
+
+
+def test_a_route_on_every_verb_implements_each_documented_verb(endpoint, view_map):
+    """Spring's `@RequestMapping("/users")` arrives from noir as `ANY`."""
+    endpoints = [endpoint("/users", "ANY", "java_spring"),
+                 endpoint("/users", "GET", "oas3"),
+                 endpoint("/users", "POST", "oas3"),
+                 endpoint("/solo", "ANY", "java_spring")]
+
+    findings, _ = evaluate(endpoints, view_map)
+    assert {(f.rule_id, f.key.method, f.key.path) for f in findings} == {
+        ("SHADOW", "ANY", "/solo"),
+    }
+
+
 def test_an_endpoint_behind_a_gateway_prefix_is_not_unexposed(endpoint, view_map):
     endpoints = [endpoint("/api", "ANY", "nginx")]
     endpoints += [

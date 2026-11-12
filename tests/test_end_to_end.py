@@ -31,9 +31,15 @@ def test_a_real_scan_matches_across_the_notation_boundary():
     The fixture pairs three Flask routes with a three-path OpenAPI document.
     Two of each describe the same endpoint in different syntax and must cancel
     out; the leftovers are one undocumented route and one unbuilt contract.
+
+    Per view, as `alibi scan` does it. Noir 1.5 dedups `<int:user_id>` and
+    `{userId}` as one endpoint in a single combined scan, so the oas3 copies
+    vanished and both matched routes came back as SHADOW.
     """
-    result = collect.scan(collect.Source(str(FIXTURE)), _noir())
-    index = build(result.endpoints, ViewMap.load())
+    view_map = ViewMap.load()
+    result = collect.scan_views(collect.Source(str(FIXTURE)), _noir(),
+                                view_map.techs_by_view(collect.list_techs(_noir())))
+    index = build(result.endpoints, view_map)
     views = {v for entry in index.entries.values() for v in entry.views}
     findings, skipped = RuleSet.load().evaluate(index, views)
 
@@ -48,6 +54,18 @@ def test_a_real_scan_matches_across_the_notation_boundary():
         ("SHADOW", "GET", "/internal/metrics"),
         ("PHANTOM", "GET", "/reports/{}"),
     }
+
+
+@requires_noir
+def test_the_users_noir_config_cannot_reach_into_a_view_scan(tmp_path, monkeypatch):
+    """Noir reads `$NOIR_HOME/config.yaml` on every scan, flags or not."""
+    (tmp_path / "config.yaml").write_text('exclude_techs: "oas3"\n')
+    monkeypatch.setenv("NOIR_HOME", str(tmp_path))
+    view_map = ViewMap.load()
+    result = collect.scan_views(collect.Source(str(FIXTURE)), _noir(),
+                                view_map.techs_by_view(collect.list_techs(_noir())))
+    views = {v for e in build(result.endpoints, view_map).entries.values() for v in e.views}
+    assert views == {"code", "doc"}
 
 
 @requires_noir
@@ -89,6 +107,17 @@ def test_two_identical_scans_leave_nothing_for_the_history_to_report(
     capsys.readouterr()
     assert cli.main(["history", str(database)]) == cli.EXIT_OK
     assert "No finding appeared or disappeared" in capsys.readouterr().out
+
+
+@requires_noir
+def test_suppressing_a_finding_is_not_resolving_it(tmp_path, capsys):
+    database = tmp_path / "snapshots.db"
+    for extra in ([], ["--ignore", "^/reports"]):
+        assert cli.main(["scan", str(FIXTURE), "--snapshot", str(database),
+                         *extra]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["history", str(database)]) == cli.EXIT_OK
+    assert "RESOLVED" not in capsys.readouterr().out
 
 
 @requires_noir

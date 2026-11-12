@@ -95,6 +95,12 @@ _DANGEROUS_NOIR_ARGS: tuple[tuple[tuple[str, ...], str], ...] = (
         "drops what they agree on -- a whole view can vanish",
     ),
     (
+        ("--config-file",),
+        "loads a noir config whose `techs`, `exclude_techs`, `only_techs` or "
+        "`base` keys undo the per-view scans the same way their flags do; "
+        "pass the flags you need after a bare -- instead",
+    ),
+    (
         ("-b", "--base-path"),
         "adds the path to every view scan of every source, so its endpoints "
         "are counted once per source and reported under the wrong one; name "
@@ -266,7 +272,15 @@ def sources(paths: list[str]) -> list[Source]:
     came back empty.
 
     A basename shared by more than one path falls back to the path as typed.
+
+    A path named twice (`app` and `app/`) is one source. Scanned twice, it
+    cost a second set of noir runs and printed two rows each claiming the
+    same endpoints.
     """
+    first: dict[Path, str] = {}
+    for path in paths:
+        first.setdefault(Path(path).resolve(), path)
+    paths = list(first.values())
     built = [Source(path=path) for path in paths]
     taken = Counter(source.name for source in built)
     for source, path in zip(built, paths, strict=True):
@@ -380,11 +394,22 @@ def scan(source: Source, noir_bin: str, extra_args: list[str] | None = None,
     cmd = [noir_bin, "-b", source.path, "-f", "json", "-T"]
     if only_techs:
         cmd += ["--only-techs", ",".join(only_techs)]
-    cmd += extra_args or []
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False
-        )
+        # An empty config file in place of the user's. Noir reads
+        # `~/.config/noir/config.yaml` on every scan, and a `techs:` or
+        # `exclude_techs:` line there does what the refused flags do, with
+        # nothing on the command line to refuse: `exclude_techs: oas3` and
+        # the matched fixture reported "no doc source in this scan".
+        with tempfile.TemporaryDirectory(prefix="alibi-") as home:
+            config = Path(home) / "config.yaml"
+            config.touch()
+            # Ahead of the passthrough: after it, a dangling `--exclude-path`
+            # took the config path as its value and the user's config was
+            # read after all.
+            proc = subprocess.run(
+                cmd + ["--config-file", str(config)] + (extra_args or []),
+                capture_output=True, text=True, timeout=timeout, check=False,
+            )
     except subprocess.TimeoutExpired as exc:
         raise NoirFailed(f"noir timed out after {timeout}s on {source.path}") from exc
     except OSError as exc:

@@ -339,3 +339,20 @@ def test_the_severity_mix_follows_a_custom_ladder(endpoint, view_map):
 
     group = [F("severe"), F("severe"), F("minor")]
     assert text._breakdown(group, ["minor", "severe"]) == "  ·  2 severe, 1 minor"
+
+
+def test_everything_suppressed_still_shows_what_was_suppressed(endpoint, view_map):
+    from alibi.ignore import IgnoreList
+
+    ruleset = RuleSet.load()
+    index = build([endpoint("/internal/x", "GET", "python_flask"),
+                   endpoint("/anchor", "GET", "oas3"),
+                   endpoint("/anchor", "GET", "python_flask")], view_map)
+    findings, skipped = ruleset.evaluate(index, {"code", "doc"})
+    kept, suppressed = IgnoreList.from_patterns([r"^/internal/"]).apply(findings)
+    assert kept == []
+    stream = io.StringIO()
+    text.render(index, kept, skipped, ruleset, ["fixture"], (), suppressed, stream)
+    report = stream.getvalue()
+    assert "See below" in report
+    assert "1 finding suppressed" in report and "given on the command line" in report

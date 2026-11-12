@@ -46,7 +46,7 @@ def read_yaml(source: Path, error: type[Exception]):
             return yaml.safe_load(handle)
     except OSError as exc:
         raise error(f"cannot read {source}: {exc.strerror or exc}") from exc
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
         raise error(f"{source} is not valid YAML: {exc}") from exc
 
 
