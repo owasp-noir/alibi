@@ -19,6 +19,11 @@ Notable changes to alibi. The format follows
 
 ### Added
 
+- noir 1.5's eleven new technologies are placed: `apigee`, `haproxy`,
+  `krakend`, `ocelot`, `spring_cloud_gateway`, `tyk` and `yarp` on the
+  gateway view; `hurl`, `hoppscotch` and `thunder_client` as curated traffic;
+  `thrift` as doc. Unmapped, every one of them was read as code.
+
 - `graphql_operation` on the traffic view as curated. Noir v1.4 registered
   the former GraphQL-operation file hook as a real technology (#2702); without
   a line here `alibi doctor` and the noir-integration job treated it as code.
@@ -47,6 +52,48 @@ Notable changes to alibi. The format follows
   mounted through a helper noir does not follow. One question, not 207.
 
 ### Fixed
+
+- Noir's own `~/.config/noir/config.yaml` no longer reaches a scan. Its
+  `techs` and `exclude_techs` keys do what the refused flags do, with nothing
+  on the command line to refuse: `exclude_techs: oas3` reported "no doc
+  source in this scan". Each scan hands noir an empty `--config-file`, and
+  `--config-file` in the passthrough is refused.
+
+- A code route on every verb (`ANY`, from Spring's method-less
+  `@RequestMapping`, Phoenix's `match :*`, ASP.NET) implements each verb
+  another view names on that path. `ANY /users` beside a documented `GET`
+  and `POST /users` was a SHADOW and two PHANTOMs.
+
+- GraphQL, OpenRPC and Livewire operations (`/graphql#Query.me`) keep their
+  operation name as a literal last segment. Read as regex, every operation
+  keyed as one `/{}`, and Graphene's `/graphql/#Query.me` never met the
+  SDL's `/graphql#Query.me`.
+
+- A regex anchor at the edge of a path is not a parameter. Kong's literal
+  `/kong-literal$` keyed as `/{}`, a gateway prefix that "reached" every
+  code endpoint and hid their UNEXPOSED findings. `~` is an ordinary path
+  character too.
+
+- A routing rule reaching only non-HTTP surface reaches nothing: a gateway
+  `location /agent/` in front of a CLI command is DANGLING.
+
+- `alibi history` names rules that started running instead of saying "No
+  finding appeared or disappeared" over their findings, and a finding
+  suppressed between two scans is no longer listed as RESOLVED. `history`
+  on an empty file leaves it empty.
+
+- Suppression: `--ignore ""` (an unset CI variable) is refused instead of
+  silencing the whole scan; every source's `.alibi.yml` is read, not only
+  the first; "See below" under a fully suppressed scan has the suppressed
+  list below it; a non-string `why`, which failed the SARIF schema, and a
+  non-UTF-8 ignore file are reported.
+
+- SARIF paths hang off the one declared `%SRCROOT%` or the working
+  directory. With several absolute sources each path was relative to its
+  own root, so `app.rb` in two of them was one URI.
+
+- A path named twice is one source, and a path that does not exist fails
+  before any source is scanned.
 
 - `-t` / `--techs` and `-b` / `--base-path` are refused in noir passthrough.
   `-t` was allowed as harmless and is the opposite: it adds the analyzer to
