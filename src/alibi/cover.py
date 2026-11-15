@@ -71,10 +71,7 @@ def _match(pattern: list[str], path: list[str]) -> bool:
 
     if head == _MANY:
         # Zero or more segments. Try every split, shortest first.
-        for take in range(len(path) + 1):
-            if _match(rest, path[take:]):
-                return True
-        return False
+        return any(_match(rest, path[take:]) for take in range(len(path) + 1))
 
     if not path:
         return False

@@ -57,13 +57,7 @@ class DangerousNoirArg(ValueError):
 # as `--exclude-path`, `--concurrency`, or `--tls-skip-verify` stay allowed.
 _DANGEROUS_NOIR_ARGS: tuple[tuple[tuple[str, ...], str], ...] = (
     (
-        ("--diff-ref",),
-        "switches noir into Diff Mode, so stdout is a diff rather than the "
-        "endpoints JSON alibi parses -- a scan that looks clean for the wrong "
-        "reason",
-    ),
-    (
-        ("--diff-path",),
+        ("--diff-ref", "--diff-path"),
         "switches noir into Diff Mode, so stdout is a diff rather than the "
         "endpoints JSON alibi parses -- a scan that looks clean for the wrong "
         "reason",

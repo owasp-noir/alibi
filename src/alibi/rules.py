@@ -165,10 +165,7 @@ class RuleSet:
                                      f"a valid regular expression: {exc}") from exc
 
     def _shift(self, severity: str, steps: int) -> str:
-        try:
-            position = self.severities.index(severity)
-        except ValueError:
-            return severity
+        position = self.severities.index(severity)
         moved = max(0, min(len(self.severities) - 1, position + steps))
         return self.severities[moved]
 
@@ -348,15 +345,10 @@ class RuleSet:
         """Does this rule lean on a routing view that barely touches the code?"""
         if rule is None:
             return False
-        views = [v for v in rule.get("needs", []) if v in index.coverages]
         stats = index.coverage_stats()
-        for view in views:
-            if view not in stats:
-                continue
-            _, reached, total = stats[view]
-            if total and reached / total < THIN_COVERAGE:
-                return True
-        return False
+        return any(total and reached / total < THIN_COVERAGE
+                   for _, reached, total in (stats[v] for v in rule.get("needs", [])
+                                             if v in stats))
 
     def _available_signals(self, index: Index) -> set[str]:
         """Which absence-based adjustments have evidence that they mean anything.
@@ -369,10 +361,7 @@ class RuleSet:
         every_tag = {tag for entry in index.entries.values() for tag in entry.tags}
         live: set[str] = set()
         for adjustment in self.adjustments:
-            needs = adjustment.get("needs_signal")
-            if not needs:
-                continue
-            pattern = needs.get("tag_matching")
+            pattern = (adjustment.get("needs_signal") or {}).get("tag_matching")
             if pattern and any(re.search(pattern, tag, re.IGNORECASE) for tag in every_tag):
                 live.add(adjustment["id"])
         return live

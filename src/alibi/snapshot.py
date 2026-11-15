@@ -484,8 +484,4 @@ def _check_version(conn: sqlite3.Connection, path: Path) -> None:
 
 
 def _now() -> str:
-    return (
-        datetime.now(UTC)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
