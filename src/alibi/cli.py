@@ -158,14 +158,11 @@ def main(argv: list[str] | None = None) -> int:
             return _scan(args)
         if args.command == "doctor":
             return _doctor(args)
-        if args.command == "history":
-            return _history(args)
+        return _history(args)
     except (collect.NoirNotFound, collect.NoirFailed, collect.NoirTooOld,
-            collect.DangerousNoirArg, snapshot.SnapshotError, IgnoreError,
-            RulesError, ViewsError) as exc:
+            snapshot.SnapshotError, IgnoreError, RulesError, ViewsError) as exc:
         print(f"alibi: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    return EXIT_ERROR
 
 
 def _scan(args) -> int:

@@ -109,7 +109,4 @@ class ViewMap:
         *new specification analyzer* would silently be read as code -- which is
         what `alibi doctor` exists to catch.
         """
-        found = self._techs.get(tech)
-        if found is not None:
-            return found
-        return TechView(tech, self._default)
+        return self._techs.get(tech) or TechView(tech, self._default)

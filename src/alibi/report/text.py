@@ -314,9 +314,7 @@ def _shorten(path: str, root: str = "") -> str:
     file. The working directory is the fallback, for a noir path that does not
     sit under any root alibi knows about.
     """
-    for base in (root, str(Path.cwd())):
-        if not base:
-            continue
+    for base in filter(None, (root, str(Path.cwd()))):
         try:
             return str(Path(path).relative_to(Path(base)))
         except ValueError:
@@ -435,12 +433,8 @@ def _render_near_misses(findings: list[Finding], paint: Painter, out) -> None:
     # list compared each entry against every one already flagged, field by
     # field -- at 20,000 synthetic endpoints, 1.6 of the 1.8 seconds the
     # whole post-scan pipeline took.
-    flagged: list[Entry] = []
-    seen: set[int] = set()
-    for finding in findings:
-        if finding.uncertain and id(finding.entry) not in seen:
-            seen.add(id(finding.entry))
-            flagged.append(finding.entry)
+    flagged: list[Entry] = list(
+        {id(f.entry): f.entry for f in findings if f.uncertain}.values())
     if not flagged:
         return
     out()

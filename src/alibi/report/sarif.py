@@ -337,9 +337,7 @@ def _uri(path: str, root: str = "") -> str:
     if not location.is_absolute():
         return quote(location.as_posix(), safe="/")
 
-    for base in (Path(root) if root else None, Path.cwd()):
-        if base is None:
-            continue
+    for base in filter(None, (root, Path.cwd())):
         try:
             return quote(location.relative_to(base).as_posix(), safe="/")
         except ValueError:

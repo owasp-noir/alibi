@@ -26,7 +26,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from .index import Index
+from .cover import segments as _segments
+from .index import _PLACEHOLDERS, Index
 
 # How concentrated a view must be before its prefix reads as a deliberate
 # scope rather than a coincidence of naming.
@@ -239,13 +240,6 @@ def _inside_root(path: str, root: str) -> str:
 # same; nothing measured needed more, and every extra depth is a chance for a
 # coincidence.
 MAX_PREFIX_SEGMENTS = 3
-
-_PLACEHOLDERS = ("{}", "*")
-
-
-def _segments(path: str) -> list[str]:
-    return [s for s in path.split("/") if s]
-
 
 def _constant(segments: list[str]) -> bool:
     return all(s not in _PLACEHOLDERS for s in segments)

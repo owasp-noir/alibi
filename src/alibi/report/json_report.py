@@ -77,7 +77,13 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
                 for view, (rules, reached, total) in index.coverage_stats().items()
             },
         },
-        "scope_hint": _hint(suggest(index, findings, ruleset)),
+        "scope_hint": (
+            {"view": h.view, "prefix": h.prefix,
+             "concentration": round(h.concentration, 3),
+             "findings_inside": h.inside, "findings_outside": h.outside,
+             "ignore_pattern": h.ignore_pattern}
+            if (h := suggest(index, findings, ruleset)) else None
+        ),
         "missing_subtree": (
             {"rule": ms.rule_id, "prefix": ms.prefix, "findings": ms.findings,
              "of": ms.total, "absent_view": ms.absent_view}
@@ -123,19 +129,6 @@ def build(index: Index, findings: list[Finding], skipped: list[Skipped],
     if endpoints:
         document["endpoints"] = _by_view(index)
     return document
-
-
-def _hint(hint) -> dict | None:
-    if hint is None:
-        return None
-    return {
-        "view": hint.view,
-        "prefix": hint.prefix,
-        "concentration": round(hint.concentration, 3),
-        "findings_inside": hint.inside,
-        "findings_outside": hint.outside,
-        "ignore_pattern": hint.ignore_pattern,
-    }
 
 
 def _finding(finding: Finding) -> dict:
