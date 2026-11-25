@@ -6,16 +6,14 @@ Notable changes to alibi. The format follows
 
 ## [Unreleased]
 
-### Changed
+## [0.2.0] - 2026-11-25
 
-- `grpc` speaks for the code view. A .proto's `option (google.api.http)` is
-  what generates a gRPC-gateway's HTTP surface, and noir emits an HTTP route
-  from nothing else -- so the proto is where those routes are implemented,
-  and the OpenAPI document beside it was generated from it. Filed as doc, the
-  two corroborated each other and the Go code never entered the comparison:
-  flipt and Argo CD both reported 0 documented paths corroborated and were
-  held back as views that never met. flipt now corroborates 36 of 36 and
-  Argo CD 38 of 106.
+Support for noir 1.4 and 1.5, an endpoint listing in the JSON report, and a
+long run of fixes for wrong findings found by scanning real repositories. Most
+of the fixes make alibi report less: findings that came from two views failing
+to recognise the same endpoint, from noir flags or config quietly collapsing a
+view, or from a gateway that does not front the code. Scans are now
+reproducible and no longer super-linear in the number of endpoints.
 
 ### Added
 
@@ -23,14 +21,12 @@ Notable changes to alibi. The format follows
   `krakend`, `ocelot`, `spring_cloud_gateway`, `tyk` and `yarp` on the
   gateway view; `hurl`, `hoppscotch` and `thunder_client` as curated traffic;
   `thrift` as doc. Unmapped, every one of them was read as code.
-
 - `graphql_operation` on the traffic view as curated. Noir v1.4 registered
   the former GraphQL-operation file hook as a real technology (#2702); without
   a line here `alibi doctor` and the noir-integration job treated it as code.
   Operation documents (`query Foo { … }` in `.graphql` / `.gql`) are client
-  requests, not the SDL schema `graphql_sdl` already maps under doc — same
+  requests, not the SDL schema `graphql_sdl` already maps under doc -- same
   class as `.http` files and Postman collections.
-
 - `alibi scan -f json --endpoints` lists what every view actually held:
   method, path, protocol, which views vouched for it, the technologies
   behind it, the spelling before normalization, and the files. Without it,
@@ -51,50 +47,45 @@ Notable changes to alibi. The format follows
   `/api/v3`, where the code view holds nothing at all -- Express routers
   mounted through a helper noir does not follow. One question, not 207.
 
+### Changed
+
+- `grpc` speaks for the code view. A .proto's `option (google.api.http)` is
+  what generates a gRPC-gateway's HTTP surface, and noir emits an HTTP route
+  from nothing else -- so the proto is where those routes are implemented,
+  and the OpenAPI document beside it was generated from it. Filed as doc, the
+  two corroborated each other and the Go code never entered the comparison:
+  flipt and Argo CD both reported 0 documented paths corroborated and were
+  held back as views that never met. flipt now corroborates 36 of 36 and
+  Argo CD 38 of 106.
+- `--noir-arg` and a bare `--` refuse flags that would make a scan look
+  clean for the wrong reason: `-f` / `--format` (breaks the JSON alibi
+  parses), `--diff-ref` / `--diff-path` (Diff Mode), `--only-techs` /
+  `--exclude-techs` (collapse alibi's per-view detector pools), `-t` /
+  `--techs`, `-b` / `--base-path` and `--config-file` (see Fixed). Harmless
+  passthrough such as `--exclude-path`, `--concurrency`, `--tls-skip-verify`,
+  and `--no-log` (Noir 1.4 keeps the JSON document on stdout) is unchanged.
+  Exit status 2, with the flag and the reason named before any noir process
+  starts.
+- Scanning an unchanged repository twice gives the same report twice. The five
+  view scans were read in the order they finished, so which of a finding's
+  source files was reported as its location came down to a race between five
+  noir processes, and the view counts were accumulated from a set, whose order
+  follows the interpreter's hash seed. 0.1.0 produced four distinct reports in
+  five scans of kong. Which findings are reported, at what severity and in
+  what order, is unchanged -- the views are now read in the order they were
+  submitted, which puts the code view first, so a finding is located in the
+  code that implements it rather than in whichever contract or gateway file
+  happened to arrive first.
+
 ### Fixed
+
+#### Noir integration
 
 - Noir's own `~/.config/noir/config.yaml` no longer reaches a scan. Its
   `techs` and `exclude_techs` keys do what the refused flags do, with nothing
   on the command line to refuse: `exclude_techs: oas3` reported "no doc
   source in this scan". Each scan hands noir an empty `--config-file`, and
   `--config-file` in the passthrough is refused.
-
-- A code route on every verb (`ANY`, from Spring's method-less
-  `@RequestMapping`, Phoenix's `match :*`, ASP.NET) implements each verb
-  another view names on that path. `ANY /users` beside a documented `GET`
-  and `POST /users` was a SHADOW and two PHANTOMs.
-
-- GraphQL, OpenRPC and Livewire operations (`/graphql#Query.me`) keep their
-  operation name as a literal last segment. Read as regex, every operation
-  keyed as one `/{}`, and Graphene's `/graphql/#Query.me` never met the
-  SDL's `/graphql#Query.me`.
-
-- A regex anchor at the edge of a path is not a parameter. Kong's literal
-  `/kong-literal$` keyed as `/{}`, a gateway prefix that "reached" every
-  code endpoint and hid their UNEXPOSED findings. `~` is an ordinary path
-  character too.
-
-- A routing rule reaching only non-HTTP surface reaches nothing: a gateway
-  `location /agent/` in front of a CLI command is DANGLING.
-
-- `alibi history` names rules that started running instead of saying "No
-  finding appeared or disappeared" over their findings, and a finding
-  suppressed between two scans is no longer listed as RESOLVED. `history`
-  on an empty file leaves it empty.
-
-- Suppression: `--ignore ""` (an unset CI variable) is refused instead of
-  silencing the whole scan; every source's `.alibi.yml` is read, not only
-  the first; "See below" under a fully suppressed scan has the suppressed
-  list below it; a non-string `why`, which failed the SARIF schema, and a
-  non-UTF-8 ignore file are reported.
-
-- SARIF paths hang off the one declared `%SRCROOT%` or the working
-  directory. With several absolute sources each path was relative to its
-  own root, so `app.rb` in two of them was one URI.
-
-- A path named twice is one source, and a path that does not exist fails
-  before any source is scanned.
-
 - `-t` / `--techs` and `-b` / `--base-path` are refused in noir passthrough.
   `-t` was allowed as harmless and is the opposite: it adds the analyzer to
   every view's scan, and noir's (method, url) dedup then folds the
@@ -102,46 +93,11 @@ Notable changes to alibi. The format follows
   documenting it scanned as code alone -- no doc view, nothing corroborated,
   exit 0. `-b` added its path to every scan of every source, counting its
   endpoints once per source; name it as an alibi PATH instead.
-
 - A `null` technology, method, url, protocol, endpoint list or error field
-  in noir's JSON is read as absent. A `null` technology reached `sorted` beside strings and the text
-  report died with a TypeError. JSON that is not an endpoint document is
-  reported as a noir failure rather than an AttributeError.
-
-- SARIF doubted a mount as `Uncertain: None in doc -- ... may be a matching
-  failure`. A mount has no counterpart; the message now says what it is.
-
-- Snapshot paths that cannot be opened are reported, not raised: a directory
-  given to `alibi history`, a `--snapshot` whose parent cannot be created,
-  and a schema marker that is not a number were all tracebacks. Another
-  program's SQLite database -- one with a `meta` table of its own included --
-  is refused before anything is written -- `alibi
-  history` aimed at one used to add alibi's six tables to it.
-
-- An `.alibi.yml` entry with a list for `rule:` or `view:` is refused. It
-  compared unequal to every finding, so it suppressed nothing, silently.
-
-- `--noir-arg` and a bare `--` refuse flags that would make a scan look
-  clean for the wrong reason: `-f` / `--format` (breaks the JSON alibi
-  parses), `--diff-ref` / `--diff-path` (Diff Mode), and `--only-techs` /
-  `--exclude-techs` (collapse alibi's per-view detector pools). Harmless
-  passthrough such as `--exclude-path`, `--concurrency`, `--tls-skip-verify`,
-  and `--no-log` (Noir 1.4 keeps the JSON document on stdout) is unchanged.
-  Exit status 2, with the flag and the reason named before any noir process
-  starts.
-
-- `--views` and `--rules` crashed before noir ran: both loaders were written
-  for a `Path` and both flags hand them a string.
-- A gateway made of nothing but a catch-all holds `UNEXPOSED` back and says
-  so. Casdoor's Helm chart declares one Ingress rule, at `/`; coverage
-  already refused to count `location /` as reaching anything, but let it
-  reach the code's own `/` fallback, and that one touch was enough for the
-  no-overlap guard to believe the views had met. 365 findings followed, each
-  carrying the note that the routing config probably does not front the
-  code. A catch-all now reaches nothing at all -- `/*` included, which was
-  counted as reaching everything while `/` counted as nothing -- and a rule
-  that reasons from what a routing view does not reach needs that view to
-  hold at least one rule narrower than everything.
+  in noir's JSON is read as absent. A `null` technology reached `sorted`
+  beside strings and the text report died with a TypeError. JSON that is not
+  an endpoint document is reported as a noir failure rather than an
+  AttributeError.
 - An empty scan says what noir could not read. The report returned before it
   printed a single error, so a directory holding one OpenAPI document noir
   could not parse rendered as `Point alibi at a directory holding some of
@@ -153,6 +109,27 @@ Notable changes to alibi. The format follows
   them a whole doc view and a whole subtree -- both landed under `noir skipped
   media, binaries or symlinks`. It is an allow-list of the benign reasons now,
   so a reason alibi does not recognise fails loud.
+- The reason noir skipped a file survives into the report. The message was
+  trimmed from the front, which on real absolute paths spent the whole budget
+  on one path and dropped `file too large (12.35MB > 10.0MB)` -- the one fact
+  explaining why a view is missing.
+- A noir that died says how -- its exit status or the signal -- instead of
+  presenting its last progress log line as the reason.
+
+#### Path matching
+
+- A code route on every verb (`ANY`, from Spring's method-less
+  `@RequestMapping`, Phoenix's `match :*`, ASP.NET) implements each verb
+  another view names on that path. `ANY /users` beside a documented `GET`
+  and `POST /users` was a SHADOW and two PHANTOMs.
+- GraphQL, OpenRPC and Livewire operations (`/graphql#Query.me`) keep their
+  operation name as a literal last segment. Read as regex, every operation
+  keyed as one `/{}`, and Graphene's `/graphql/#Query.me` never met the
+  SDL's `/graphql#Query.me`.
+- A regex anchor at the edge of a path is not a parameter. Kong's literal
+  `/kong-literal$` keyed as `/{}`, a gateway prefix that "reached" every
+  code endpoint and hid their UNEXPOSED findings. `~` is an ordinary path
+  character too.
 - `.well-known` is a literal path segment, not a parameter. The regex-meta
   heuristic required a leading word character to recognise a filename, so
   every path under `/.well-known/` keyed as `/{}/...` -- colliding with any
@@ -166,44 +143,36 @@ Notable changes to alibi. The format follows
   `<path:subpath>` and OpenAPI's `{subpath}` never met -- and one documented
   upload route was reported as a critical shadow API and a phantom contract at
   once.
-- Code and contract paths are shown relative to the source that was scanned,
-  matching what SARIF already emits. In the conflated-contracts block this was
-  more than cosmetic: two directories of one tree printed as two unrelated
-  ones, which is the reading that block exists to let you rule out.
-- `REVIEW` lists doubt about the findings that were printed. It was built from
-  the index, so it named entries that produced no finding, and printed in full
-  the path of a finding the project had suppressed.
-- The scope hint's `--ignore` suppresses exactly what its count named. The old
-  pattern also removed the endpoint at the prefix itself, which the count
-  treats as inside -- and which in the gRPC-gateway shape this hint appears in
-  is the mount point.
-- `alibi history` says when the two scans it compared were not given the same
-  paths. Every rule can run in both and the comparison still be meaningless:
-  two projects in one snapshot database reported each other's findings as
-  progress.
+- A routing rule is no longer the other half of a near miss. `location /api/`
+  against a captured `POST /api/cart` is coverage working, and it demoted the
+  ORPHAN on that request as a possible matching failure.
+
+#### Gateway and infrastructure coverage
+
+- A gateway made of nothing but a catch-all holds `UNEXPOSED` back and says
+  so. Casdoor's Helm chart declares one Ingress rule, at `/`; coverage
+  already refused to count `location /` as reaching anything, but let it
+  reach the code's own `/` fallback, and that one touch was enough for the
+  no-overlap guard to believe the views had met. 365 findings followed, each
+  carrying the note that the routing config probably does not front the
+  code. A catch-all now reaches nothing at all -- `/*` included, which was
+  counted as reaching everything while `/` counted as nothing -- and a rule
+  that reasons from what a routing view does not reach needs that view to
+  hold at least one rule narrower than everything.
+- A route registered with a spanning parameter (`/files/<path:p>`) is
+  reached by a gateway rule beneath it. `location /files/download/` in front
+  of it was a DANGLING rule and the route UNEXPOSED -- two findings for a
+  rule that reaches exactly the code it should.
+- A routing rule reaching only non-HTTP surface reaches nothing: a gateway
+  `location /agent/` in front of a CLI command is DANGLING.
+
+#### Sources and locations
+
+- A path named twice is one source, and a path that does not exist fails
+  before any source is scanned.
 - Two sources sharing a basename are two sources. `services/billing` and
   `services/search` merged into one bucket, and the per-source table printed
   two identical rows each claiming the other's endpoints.
-- A suppression list that cannot be read is reported rather than raised: a
-  malformed `--ignore` regex, invalid YAML, an `.alibi.yml` that is not a
-  mapping, and a missing `--ignore-file` all reached the user as tracebacks.
-  The list is now also read before noir runs, so a mistyped pattern does not
-  cost a scan.
-- The reason noir skipped a file survives into the report. The message was
-  trimmed from the front, which on real absolute paths spent the whole budget
-  on one path and dropped `file too large (12.35MB > 10.0MB)` -- the one fact
-  explaining why a view is missing.
-- Scanning an unchanged repository twice gives the same report twice. The five
-  view scans were read in the order they finished, so which of a finding's
-  source files was reported as its location came down to a race between five
-  noir processes, and the view counts were accumulated from a set, whose order
-  follows the interpreter's hash seed. 0.1.0 produced four distinct reports in
-  five scans of kong. Which findings are reported, at what severity and in
-  what order, is unchanged -- the views are now read in the order they were
-  submitted, which puts the code view first, so a finding is located in the
-  code that implements it rather than in whichever contract or gateway file
-  happened to arrive first.
-
 - A file passed by name (`alibi scan prod.har`, `openapi.yaml`) was reported
   at its staged copy -- `/var/folders/.../alibi-x1y2/prod.har`, deleted when
   the scan ended -- in the terminal and as the SARIF location. It is now
@@ -211,36 +180,90 @@ Notable changes to alibi. The format follows
 - A finding is located in the view its rule is about. Views are read in
   order within a source, but not across sources, so a SHADOW whose route
   also sat in a Bruno collection scanned earlier pointed at the `.bru`.
-- A route registered with a spanning parameter (`/files/<path:p>`) is
-  reached by a gateway rule beneath it. `location /files/download/` in front
-  of it was a DANGLING rule and the route UNEXPOSED -- two findings for a
-  rule that reaches exactly the code it should.
-- A routing rule is no longer the other half of a near miss. `location /api/`
-  against a captured `POST /api/cart` is coverage working, and it demoted the
-  ORPHAN on that request as a possible matching failure.
+- Code and contract paths are shown relative to the source that was scanned,
+  matching what SARIF already emits. In the conflated-contracts block this was
+  more than cosmetic: two directories of one tree printed as two unrelated
+  ones, which is the reading that block exists to let you rule out.
+
+#### Report
+
+- `REVIEW` lists doubt about the findings that were printed. It was built from
+  the index, so it named entries that produced no finding, and printed in full
+  the path of a finding the project had suppressed.
+- The scope hint's `--ignore` suppresses exactly what its count named. The old
+  pattern also removed the endpoint at the prefix itself, which the count
+  treats as inside -- and which in the gRPC-gateway shape this hint appears in
+  is the mount point. It also escapes its prefix: `/v1.0` no longer also keeps
+  `/v1x0`.
 - The test-code hint only reads directories inside the scanned source. A
   checkout under `~/work/tests/` was all test code, and the hint advised an
   `--exclude-path` that excluded the whole scan. Directory names keep their
   case, since noir's globs are case sensitive (`Tests/` in SwiftPM).
-- The scope hint escapes its prefix: `/v1.0` no longer also keeps `/v1x0`.
+- The per-group severity mix follows a custom ladder instead of dropping the
+  rungs it did not know.
+- The text report writes to the `stdout` of the moment rather than the one
+  bound at import, which printed into a closed stream once stdout had been
+  redirected. A word longer than the wrap width no longer leaves an empty
+  line before it.
+
+#### Suppression
+
+- `--ignore ""` (an unset CI variable) is refused instead of silencing the
+  whole scan; every source's `.alibi.yml` is read, not only the first; "See
+  below" under a fully suppressed scan has the suppressed list below it; a
+  non-string `why`, which failed the SARIF schema, and a non-UTF-8 ignore
+  file are reported.
+- An `.alibi.yml` entry with an unknown key, or no path, rule or view, is an
+  error. It used to be read and discarded, so the suppression was not there.
+- An `.alibi.yml` entry with a list for `rule:` or `view:` is refused. It
+  compared unequal to every finding, so it suppressed nothing, silently.
+- A suppression list that cannot be read is reported rather than raised: a
+  malformed `--ignore` regex, invalid YAML, an `.alibi.yml` that is not a
+  mapping, and a missing `--ignore-file` all reached the user as tracebacks.
+  The list is now also read before noir runs, so a mistyped pattern does not
+  cost a scan.
+
+#### JSON and SARIF
+
+- SARIF paths hang off the one declared `%SRCROOT%` or the working
+  directory. With several absolute sources each path was relative to its
+  own root, so `app.rb` in two of them was one URI.
+- SARIF doubted a mount as `Uncertain: None in doc -- ... may be a matching
+  failure`. A mount has no counterpart; the message now says what it is.
 - JSON `degraded` and SARIF `executionSuccessful` count only losses that
   could have cost endpoints, as the text report does; a skipped symlink no
   longer fails a CI gate. Each `scan_errors` entry says which it was.
+
+#### Snapshots and history
+
+- `alibi history` names rules that started running instead of saying "No
+  finding appeared or disappeared" over their findings, and a finding
+  suppressed between two scans is no longer listed as RESOLVED. `history`
+  on an empty file leaves it empty.
+- `alibi history` says when the two scans it compared were not given the same
+  paths. Every rule can run in both and the comparison still be meaningless:
+  two projects in one snapshot database reported each other's findings as
+  progress.
+- `--snapshot` no longer fails when one path is served on two protocols. The
+  history keys on method and path, and the duplicate row was reported as an
+  unreadable database with the scan unrecorded.
+- Snapshot paths that cannot be opened are reported, not raised: a directory
+  given to `alibi history`, a `--snapshot` whose parent cannot be created,
+  and a schema marker that is not a number were all tracebacks. Another
+  program's SQLite database -- one with a `meta` table of its own included --
+  is refused before anything is written; `alibi history` aimed at one used
+  to add alibi's six tables to it.
+
+#### Command line and configuration
+
+- `--views` and `--rules` crashed before noir ran: both loaders were written
+  for a `Path` and both flags hand them a string.
 - Mistakes in what the user supplies are reported, not raised: a
   non-executable `--noir-bin`, an unreadable or malformed `--rules` or
   `--views`, an unknown condition, an invalid regex, a missing `when`, a
   non-integer shift (all found before the scan, not after it), a rule
   severity off its ladder, and a `--fail-on` the ladder does not have.
   `--fail-on` now accepts a custom ladder's own rungs.
-- An `.alibi.yml` entry with an unknown key, or no path, rule or view, is an
-  error. It used to be read and discarded, so the suppression was not there.
-- `--snapshot` no longer fails when one path is served on two protocols. The
-  history keys on method and path, and the duplicate row was reported as an
-  unreadable database with the scan unrecorded.
-- A noir that died says how -- its exit status or the signal -- instead of
-  presenting its last progress log line as the reason.
-- The per-group severity mix follows a custom ladder instead of dropping the
-  rungs it did not know.
 
 ### Performance
 
@@ -305,5 +328,6 @@ for.
 - `alibi --version`.
 - A minimum noir version of 1.0.0, checked before a scan is spent.
 
-[Unreleased]: https://github.com/owasp-noir/alibi/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/owasp-noir/alibi/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/owasp-noir/alibi/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/owasp-noir/alibi/releases/tag/v0.1.0

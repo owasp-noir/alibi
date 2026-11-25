@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "noir-alibi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-check the views of your attack surface and find the endpoints that cannot corroborate each other"
 readme = "README.md"
 requires-python = ">=3.11"
